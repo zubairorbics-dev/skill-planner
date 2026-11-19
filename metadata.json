@@ -1,0 +1,6 @@
+{
+  "name": "Smart Skill Planner",
+  "description": "AI-powered personalized learning roadmap planner with daily task tracking, skill gap analysis, and an administrative console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

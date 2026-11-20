@@ -44,7 +44,13 @@ function isAdminPath(pathname: string): boolean {
 }
 
 export default function App() {
-  const [routePath, setRoutePath] = useState<string>(() => window.location.pathname);
+  const [routePath, setRoutePath] = useState<string>(() => {
+    const path = window.location.pathname;
+    if (path === '/admin' || path.startsWith('/admin/')) return path;
+    // Temporarily hide learner web — land on admin
+    window.history.replaceState({}, '', '/admin');
+    return '/admin';
+  });
 
   // Admin password session + isolated Firebase Auth (auto-connects Firestore)
   const [adminSession, setAdminSession] = useState<AdminSessionInfo | null>(null);
@@ -77,7 +83,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const onPopState = () => setRoutePath(window.location.pathname);
+    const onPopState = () => {
+      const path = window.location.pathname;
+      if (path === '/admin' || path.startsWith('/admin/')) {
+        setRoutePath(path);
+        return;
+      }
+      // Keep learner web hidden for now
+      window.history.replaceState({}, '', '/admin');
+      setRoutePath('/admin');
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -258,7 +273,6 @@ export default function App() {
             setAdminSession(admin);
             setAdminFsUserOk(isAdminFirestoreUser(adminClientAuth.currentUser));
           }}
-          onBackToApp={() => navigate('/')}
         />
       );
     }
@@ -266,7 +280,6 @@ export default function App() {
     return (
       <AdminConsole
         adminEmail={adminSession.email}
-        onExitAdmin={() => navigate('/')}
         onAdminLogout={handleAdminLogout}
       />
     );

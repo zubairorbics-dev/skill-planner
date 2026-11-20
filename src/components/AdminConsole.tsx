@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft,
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
@@ -27,7 +26,6 @@ import {
 
 interface AdminConsoleProps {
   adminEmail: string;
-  onExitAdmin: () => void;
   onAdminLogout: () => Promise<void>;
 }
 
@@ -58,7 +56,6 @@ function formatDateTime(ts: { toDate?: () => Date } | null | undefined): string 
 
 export const AdminConsole: React.FC<AdminConsoleProps> = ({
   adminEmail,
-  onExitAdmin,
   onAdminLogout,
 }) => {
   const [page, setPage] = useState<AdminPage>('users');
@@ -263,13 +260,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           <div className="flex lg:hidden items-center gap-3">
             <button
               type="button"
-              onClick={onExitAdmin}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 whitespace-nowrap cursor-pointer"
-            >
-              Learner App
-            </button>
-            <button
-              type="button"
               onClick={() => void onAdminLogout()}
               className="text-xs font-semibold text-slate-600 hover:text-red-700 whitespace-nowrap cursor-pointer"
             >
@@ -313,14 +303,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         </nav>
 
         <div className="hidden lg:flex flex-col gap-1 p-3 mt-auto border-t border-slate-100">
-          <button
-            type="button"
-            onClick={onExitAdmin}
-            className="min-h-[40px] px-3.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4 shrink-0" />
-            <span>Learner App</span>
-          </button>
           <button
             type="button"
             onClick={() => void onAdminLogout()}

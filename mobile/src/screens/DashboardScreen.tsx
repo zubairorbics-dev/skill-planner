@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -75,6 +76,21 @@ export const DashboardScreen: React.FC = () => {
     }
   };
 
+  const handleRegenerate = () => {
+    if (!roadmap) {
+      setShowOnboarding(true);
+      return;
+    }
+    Alert.alert(
+      'Generate a new roadmap?',
+      'Your current roadmap will be saved in Past roadmaps. A new plan will become active.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', onPress: () => setShowOnboarding(true) },
+      ]
+    );
+  };
+
   return (
     <AppScreen edges={['top', 'left', 'right']}>
       <ScrollView
@@ -88,16 +104,6 @@ export const DashboardScreen: React.FC = () => {
             roadmap
               ? `Day ${currentDay} · ${roadmap.targetRole}`
               : 'Ready to build your learning plan'
-          }
-          right={
-            <Pressable
-              style={styles.avatarBtn}
-              onPress={() => navigation.navigate('Profile')}
-            >
-              <Text style={styles.avatarText}>
-                {(firstName[0] || 'S').toUpperCase()}
-              </Text>
-            </Pressable>
           }
         />
 
@@ -152,7 +158,7 @@ export const DashboardScreen: React.FC = () => {
                 </Pressable>
                 <Pressable
                   style={styles.secondaryIconBtn}
-                  onPress={() => setShowOnboarding(true)}
+                  onPress={handleRegenerate}
                 >
                   <Ionicons name="refresh" size={18} color={colors.primary} />
                 </Pressable>
@@ -219,19 +225,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: 36,
-  },
-  avatarBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
   },
   heroCard: {
     backgroundColor: colors.surface,

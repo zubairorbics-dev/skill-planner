@@ -5,7 +5,6 @@ import {
   getDocFromServer,
   getDocs,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -366,6 +365,46 @@ export async function logAiGenerationFailure(params: {
   }
 }
 
+export async function fetchUserArchivedRoadmaps(uid: string): Promise<Roadmap[]> {
+  const path = 'roadmaps';
+  try {
+    // Single-field query avoids a composite index deploy (CLI named-DB index API is flaky).
+    const q = query(collection(db, 'roadmaps'), where('userId', '==', uid));
+    const snap = await getDocs(q);
+    const list = snap.docs
+      .map((d) => d.data() as Roadmap)
+      .filter((rm) => rm.status === 'archived');
+    list.sort(
+      (a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+    );
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function fetchRoadmapTasks(
+  uid: string,
+  roadmapId: string
+): Promise<TaskItem[]> {
+  const path = 'tasks';
+  try {
+    const q = query(
+      collection(db, 'tasks'),
+      where('userId', '==', uid),
+      where('roadmapId', '==', roadmapId)
+    );
+    const snap = await getDocs(q);
+    const items = snap.docs.map((d) => d.data() as TaskItem);
+    items.sort(
+      (a, b) => a.dayOffset - b.dayOffset || a.title.localeCompare(b.title)
+    );
+    return items;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
 export function subscribeActiveRoadmap(
   uid: string,
   onData: (roadmap: Roadmap | null) => void,
@@ -466,15 +505,27 @@ export async function toggleTaskCompletion(
 }
 
 // ============================================================================
-// Admin Console Queries (Enforced by Firestore Security Rules)
+// Admin Console Queries (Firebase Auth from password login → client Firestore)
 // ============================================================================
+function createdAtMillis(value: unknown): number {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'toMillis' in value &&
+    typeof (value as { toMillis: () => number }).toMillis === 'function'
+  ) {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  return 0;
+}
+
 export async function fetchAllProfilesAdmin(): Promise<UserProfile[]> {
-  const path = 'profiles';
   const { targetDb, targetAuth } = getActiveAdminDb();
+  const path = 'profiles';
   try {
     const snap = await getDocs(collection(targetDb, 'profiles'));
     const list = snap.docs.map((d) => d.data() as UserProfile);
-    list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+    list.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
     return list;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path, targetAuth);
@@ -485,28 +536,23 @@ export async function setUserAccountStatusAdmin(
   uid: string,
   accountStatus: 'active' | 'inactive'
 ): Promise<void> {
-  const path = `profiles/${uid}`;
   const { targetDb, targetAuth } = getActiveAdminDb();
+  const path = `profiles/${uid}`;
   try {
     const ref = doc(targetDb, 'profiles', uid);
     await updateDoc(ref, {
       accountStatus,
       updatedAt: serverTimestamp(),
     });
-    // Confirm the write landed (surfaces permission/schema failures clearly)
-    const verify = await getDocFromServer(ref);
-    const saved = verify.data()?.accountStatus;
-    if (saved !== accountStatus) {
+    const saved = await getDocFromServer(ref);
+    const data = saved.data() as UserProfile | undefined;
+    if (data?.accountStatus !== accountStatus) {
       throw new Error(
-        `Account status did not save (expected "${accountStatus}", got "${saved ?? 'missing'}"). ` +
-          'Deploy firestore.rules to the named database, then try again.'
+        `Account status did not save (expected "${accountStatus}", got "${data?.accountStatus ?? 'missing'}").`
       );
     }
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.startsWith('Account status did not save')
-    ) {
+    if (error instanceof Error && error.message.includes('Account status did not save')) {
       throw error;
     }
     handleFirestoreError(error, OperationType.UPDATE, path, targetAuth);
@@ -514,12 +560,12 @@ export async function setUserAccountStatusAdmin(
 }
 
 export async function fetchAllRoadmapsAdmin(): Promise<Roadmap[]> {
-  const path = 'roadmaps';
   const { targetDb, targetAuth } = getActiveAdminDb();
+  const path = 'roadmaps';
   try {
     const snap = await getDocs(collection(targetDb, 'roadmaps'));
     const list = snap.docs.map((d) => d.data() as Roadmap);
-    list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+    list.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
     return list;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path, targetAuth);
@@ -527,21 +573,14 @@ export async function fetchAllRoadmapsAdmin(): Promise<Roadmap[]> {
 }
 
 export async function fetchAllAiLogsAdmin(): Promise<AiLogEntry[]> {
-  const path = 'ai_logs';
   const { targetDb, targetAuth } = getActiveAdminDb();
+  const path = 'ai_logs';
   try {
-    const q = query(collection(targetDb, 'ai_logs'), orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as AiLogEntry);
+    const snap = await getDocs(collection(targetDb, 'ai_logs'));
+    const list = snap.docs.map((d) => d.data() as AiLogEntry);
+    list.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
+    return list;
   } catch (error) {
-    // Fallback without orderBy if index/ordering fails on empty collection
-    try {
-      const snap = await getDocs(collection(targetDb, 'ai_logs'));
-      const list = snap.docs.map((d) => d.data() as AiLogEntry);
-      list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
-      return list;
-    } catch (fallbackErr) {
-      handleFirestoreError(fallbackErr, OperationType.LIST, path, targetAuth);
-    }
+    handleFirestoreError(error, OperationType.LIST, path, targetAuth);
   }
 }

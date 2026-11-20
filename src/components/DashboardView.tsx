@@ -203,7 +203,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={onStartOnboarding}
+                onClick={() => {
+                  const ok = window.confirm(
+                    'Generate a new roadmap?\n\nYour current roadmap will be saved in Past roadmaps. A new plan will become active.'
+                  );
+                  if (ok) onStartOnboarding();
+                }}
                 className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />

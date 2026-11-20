@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,13 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { TaskItem } from '../types/planner';
 import { colors, radii, shadows, spacing } from '../theme';
 
+function getCurrentDayOffset(createdAt: { toMillis?: () => number } | null | undefined): number {
+  const createdMs = createdAt?.toMillis?.() ?? Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const elapsed = Math.floor((Date.now() - createdMs) / dayMs);
+  return Math.max(1, elapsed + 1);
+}
+
 export const RoadmapScreen: React.FC = () => {
   const { roadmap, tasks, togglingTaskId, setTogglingTaskId, setShowOnboarding } =
     usePlannerStore();
@@ -22,8 +30,20 @@ export const RoadmapScreen: React.FC = () => {
     roadmap?.phases?.[0]?.id ?? 'phase_1'
   );
 
+  const currentDay = useMemo(
+    () => getCurrentDayOffset(roadmap?.createdAt ?? null),
+    [roadmap?.createdAt]
+  );
+
   const handleToggle = async (task: TaskItem) => {
     if (!roadmap || togglingTaskId) return;
+    if (!task.isCompleted && task.dayOffset > currentDay) {
+      Alert.alert(
+        'Upcoming task',
+        'You can only mark past or today’s tasks as complete. Upcoming tasks stay locked until their day.'
+      );
+      return;
+    }
     setTogglingTaskId(task.id);
     try {
       await toggleTaskCompletion(task, roadmap, tasks);
@@ -132,6 +152,7 @@ export const RoadmapScreen: React.FC = () => {
                             task={task}
                             showResources
                             busy={togglingTaskId === task.id}
+                            locked={!task.isCompleted && task.dayOffset > currentDay}
                             onToggle={(t) => void handleToggle(t)}
                           />
                         ))}

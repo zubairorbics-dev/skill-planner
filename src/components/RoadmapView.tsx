@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { CheckCircle2, ChevronDown, Compass } from 'lucide-react';
 import { Roadmap, TaskItem } from '../types/planner';
+import { getRoadmapCurrentDayOffset } from './DashboardView';
 import { TaskRow } from './TaskRow';
 
 interface RoadmapViewProps {
@@ -22,10 +23,22 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
     p1: true,
   });
 
+  const currentDay = getRoadmapCurrentDayOffset(roadmap);
+
   const totalWeeks = useMemo(
     () => (roadmap ? roadmap.phases.reduce((acc, p) => acc + p.durationWeeks, 0) : 0),
     [roadmap]
   );
+
+  const handleToggle = (task: TaskItem) => {
+    if (!task.isCompleted && task.dayOffset > currentDay) {
+      window.alert(
+        'Upcoming tasks are locked. You can only mark past or today’s tasks as complete.'
+      );
+      return;
+    }
+    onToggleTask(task);
+  };
 
   const togglePhase = (phaseId: string) => {
     setExpandedPhases((prev) => ({
@@ -192,7 +205,8 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                               key={task.id}
                               task={task}
                               disabled={togglingTaskId === task.id}
-                              onToggle={onToggleTask}
+                              locked={!task.isCompleted && task.dayOffset > currentDay}
+                              onToggle={handleToggle}
                               showResources
                             />
                           ))}

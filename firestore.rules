@@ -20,8 +20,22 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isBootstrappedAdmin() {
+    // Google-verified owner account (legacy bootstrap)
+    function isGoogleBootstrappedAdmin() {
       return isVerified() && request.auth.token.email == 'zubair.orbics@gmail.com';
+    }
+
+    // Password Admin Console account (same email/password as ADMIN_EMAIL / ADMIN_PASSWORD).
+    // email_verified is not required so panel login can auto-connect Firestore without Google.
+    function isPasswordPanelAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin.skill@yopmail.com' ||
+        request.auth.token.email == 'admin@smartskillplanner.com'
+      );
+    }
+
+    function isBootstrappedAdmin() {
+      return isGoogleBootstrappedAdmin() || isPasswordPanelAdmin();
     }
 
     function isAdmin() {

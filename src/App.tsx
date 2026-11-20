@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import {
   BarChart3,
   CheckSquare,
@@ -7,13 +7,7 @@ import {
   Map as MapIcon,
   User as UserIcon,
 } from 'lucide-react';
-import {
-  adminClientAuth,
-  adminGoogleAuthProvider,
-  adminSelectAccountProvider,
-  auth,
-  isVerifiedBootstrappedAdmin,
-} from './lib/firebase';
+import { adminClientAuth, auth, isAdminFirestoreUser } from './lib/firebase';
 import {
   AdminSessionInfo,
   logoutAdminSession,
@@ -52,11 +46,11 @@ function isAdminPath(pathname: string): boolean {
 export default function App() {
   const [routePath, setRoutePath] = useState<string>(() => window.location.pathname);
 
-  // Separate Admin Credential Session State + Isolated Admin Firebase Auth
+  // Admin password session + isolated Firebase Auth (auto-connects Firestore)
   const [adminSession, setAdminSession] = useState<AdminSessionInfo | null>(null);
   const [adminChecking, setAdminChecking] = useState<boolean>(true);
-  const [adminFirebaseUser, setAdminFirebaseUser] = useState<User | null>(null);
-  const [adminAuthReady, setAdminAuthReady] = useState(false);
+  const [adminFsReady, setAdminFsReady] = useState(false);
+  const [adminFsUserOk, setAdminFsUserOk] = useState(false);
 
   // Learner Firebase Auth & Firestore State
   const [user, setUser] = useState<User | null>(null);
@@ -98,12 +92,28 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Verify existing separate Admin session token on boot
+  // Isolated Admin Firebase Auth (password login signs in here — no Google)
   useEffect(() => {
+    const unsub = onAuthStateChanged(adminClientAuth, (firebaseUser) => {
+      setAdminFsUserOk(isAdminFirestoreUser(firebaseUser));
+      setAdminFsReady(true);
+    });
+    return unsub;
+  }, []);
+
+  // Verify existing Admin session token on boot; drop it if Firestore auth is gone
+  useEffect(() => {
+    if (!adminFsReady) return;
     let active = true;
     verifyStoredAdminSession()
-      .then((session) => {
-        if (active) setAdminSession(session);
+      .then(async (session) => {
+        if (!active) return;
+        if (session && !isAdminFirestoreUser(adminClientAuth.currentUser)) {
+          await logoutAdminSession();
+          setAdminSession(null);
+          return;
+        }
+        setAdminSession(session);
       })
       .finally(() => {
         if (active) setAdminChecking(false);
@@ -111,7 +121,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [adminFsReady]);
 
   // 1a. Learner Firebase Auth state listener
   useEffect(() => {
@@ -125,15 +135,6 @@ export default function App() {
         setProfileLoading(false);
         setShowOnboarding(false);
       }
-    });
-    return unsub;
-  }, []);
-
-  // 1b. Isolated Admin Console Firebase Auth state listener (unaffected by learner sign-out)
-  useEffect(() => {
-    const unsub = onAuthStateChanged(adminClientAuth, (firebaseUser) => {
-      setAdminFirebaseUser(firebaseUser);
-      setAdminAuthReady(true);
     });
     return unsub;
   }, []);
@@ -213,14 +214,6 @@ export default function App() {
     setAdminSession(null);
   };
 
-  const handleAuthorizeFirestoreAdmin = async (forceSelectAccount = false) => {
-    const provider = forceSelectAccount
-      ? adminSelectAccountProvider
-      : adminGoogleAuthProvider;
-    const result = await signInWithPopup(adminClientAuth, provider);
-    setAdminFirebaseUser(result.user);
-  };
-
   const handleToggleTask = async (task: TaskItem) => {
     if (!roadmap || togglingTaskId) return;
     const currentDay = (() => {
@@ -247,7 +240,7 @@ export default function App() {
   // SEPARATE ADMIN ROUTE (/admin) — Independent Login & Credentials
   // ==========================================================================
   if (isAdminPath(routePath)) {
-    if (adminChecking || !authReady || !adminAuthReady) {
+    if (adminChecking || !adminFsReady) {
       return (
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
           <div className="text-center">
@@ -258,32 +251,21 @@ export default function App() {
       );
     }
 
-    const hasFirestoreAdminAuth =
-      isVerifiedBootstrappedAdmin(adminFirebaseUser) ||
-      isVerifiedBootstrappedAdmin(user);
-
-    if (!adminSession) {
+    if (!adminSession || !adminFsUserOk) {
       return (
         <AdminLoginScreen
-          hasFirestoreAdminAuth={hasFirestoreAdminAuth}
-          onAuthorizeFirestore={() => handleAuthorizeFirestoreAdmin(false)}
-          onSuccess={(admin) => setAdminSession(admin)}
+          onSuccess={(admin) => {
+            setAdminSession(admin);
+            setAdminFsUserOk(isAdminFirestoreUser(adminClientAuth.currentUser));
+          }}
           onBackToApp={() => navigate('/')}
         />
       );
     }
 
-    const connectedFirebaseEmail =
-      adminFirebaseUser?.email || user?.email || null;
-
     return (
       <AdminConsole
         adminEmail={adminSession.email}
-        hasFirestoreAdminAuth={hasFirestoreAdminAuth}
-        connectedFirebaseEmail={
-          hasFirestoreAdminAuth ? null : connectedFirebaseEmail
-        }
-        onAuthorizeFirestore={() => handleAuthorizeFirestoreAdmin(true)}
         onExitAdmin={() => navigate('/')}
         onAdminLogout={handleAdminLogout}
       />
@@ -439,6 +421,7 @@ export default function App() {
             {activeTab === 'profile' && (
               <ProfileView
                 profile={profile}
+                hasActiveRoadmap={Boolean(roadmap)}
                 onSignOut={handleLearnerSignOut}
                 onRegenerateRoadmap={() => setShowOnboarding(true)}
                 onToast={showToast}

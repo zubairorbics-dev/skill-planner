@@ -3,15 +3,11 @@ import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { AdminSessionInfo, loginAdminWithCredentials } from '../lib/adminAuth';
 
 interface AdminLoginScreenProps {
-  hasFirestoreAdminAuth: boolean;
-  onAuthorizeFirestore: () => Promise<void>;
   onSuccess: (admin: AdminSessionInfo) => void;
   onBackToApp: () => void;
 }
 
 export const AdminLoginScreen: React.FC<AdminLoginScreenProps> = ({
-  hasFirestoreAdminAuth,
-  onAuthorizeFirestore,
   onSuccess,
   onBackToApp,
 }) => {
@@ -31,14 +27,6 @@ export const AdminLoginScreen: React.FC<AdminLoginScreenProps> = ({
     setError(null);
     try {
       const admin = await loginAdminWithCredentials(email.trim(), password);
-      if (!hasFirestoreAdminAuth) {
-        try {
-          await onAuthorizeFirestore();
-        } catch {
-          // If the browser blocks or dismisses the one-time popup, AdminConsole
-          // displays an inline retry button so the admin session is preserved.
-        }
-      }
       onSuccess(admin);
     } catch (err: unknown) {
       setError(

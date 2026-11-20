@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocFromServer,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -318,6 +319,36 @@ export async function saveGeneratedRoadmapAndLog(params: {
   }
 
   return roadmapId;
+}
+
+export async function fetchUserArchivedRoadmaps(uid: string): Promise<Roadmap[]> {
+  // Single-field query avoids a composite index deploy (CLI named-DB index API is flaky).
+  const q = query(collection(db, 'roadmaps'), where('userId', '==', uid));
+  const snap = await getDocs(q);
+  const list = snap.docs
+    .map((d) => d.data() as Roadmap)
+    .filter((rm) => rm.status === 'archived');
+  list.sort(
+    (a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+  );
+  return list;
+}
+
+export async function fetchRoadmapTasks(
+  uid: string,
+  roadmapId: string
+): Promise<TaskItem[]> {
+  const q = query(
+    collection(db, 'tasks'),
+    where('userId', '==', uid),
+    where('roadmapId', '==', roadmapId)
+  );
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => d.data() as TaskItem);
+  items.sort(
+    (a, b) => a.dayOffset - b.dayOffset || a.title.localeCompare(b.title)
+  );
+  return items;
 }
 
 export function subscribeActiveRoadmap(

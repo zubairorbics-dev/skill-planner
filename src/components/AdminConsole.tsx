@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Cpu,
-  Database,
   LogOut,
   RefreshCw,
   Search,
@@ -28,9 +27,6 @@ import {
 
 interface AdminConsoleProps {
   adminEmail: string;
-  hasFirestoreAdminAuth: boolean;
-  connectedFirebaseEmail?: string | null;
-  onAuthorizeFirestore: () => Promise<void>;
   onExitAdmin: () => void;
   onAdminLogout: () => Promise<void>;
 }
@@ -62,9 +58,6 @@ function formatDateTime(ts: { toDate?: () => Date } | null | undefined): string 
 
 export const AdminConsole: React.FC<AdminConsoleProps> = ({
   adminEmail,
-  hasFirestoreAdminAuth,
-  connectedFirebaseEmail,
-  onAuthorizeFirestore,
   onExitAdmin,
   onAdminLogout,
 }) => {
@@ -76,7 +69,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const [roadmaps, setRoadmaps] = useState<Roadmap[]>([]);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [authorizingDb, setAuthorizingDb] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,10 +84,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const [logPageNum, setLogPageNum] = useState(1);
 
   const loadData = useCallback(async () => {
-    if (!hasFirestoreAdminAuth) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
@@ -114,23 +102,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [hasFirestoreAdminAuth]);
-
-  const handleConnectDb = async () => {
-    setAuthorizingDb(true);
-    setError(null);
-    try {
-      await onAuthorizeFirestore();
-    } catch (e: unknown) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Could not authorize database access. Please sign in with the project administrator Google account.'
-      );
-    } finally {
-      setAuthorizingDb(false);
-    }
-  };
+  }, []);
 
   const handleToggleAccountStatus = async () => {
     if (!selectedUser || statusUpdating) return;
@@ -389,7 +361,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             <button
               type="button"
               onClick={() => void loadData()}
-              disabled={loading || !hasFirestoreAdminAuth}
+              disabled={loading}
               className="min-h-[38px] px-3.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -414,49 +386,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             </div>
           )}
 
-          {!hasFirestoreAdminAuth ? (
-            <div className="max-w-lg mx-auto mt-10 bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-xs">
-              <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4">
-                <Database className="w-6 h-6" />
-              </div>
-              <h1 className="text-lg font-bold text-slate-900 mb-2">
-                One-time browser database authorization
-              </h1>
-              <p className="text-sm text-slate-500 leading-relaxed mb-4">
-                Signed in as{' '}
-                <span className="font-mono text-slate-700">{adminEmail}</span>.
-                Confirm your project owner Firebase account once in this browser
-                to load live profiles and AI logs. Future admin logins in this
-                browser will load data immediately without asking again.
-              </p>
-              {connectedFirebaseEmail && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 mb-5">
-                  Currently linked to{' '}
-                  <span className="font-mono font-semibold">
-                    {connectedFirebaseEmail}
-                  </span>
-                  , which does not have Firestore administrator permission.
-                  Choose the project owner Google account below.
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => void handleConnectDb()}
-                disabled={authorizingDb}
-                className="min-h-[42px] px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors cursor-pointer disabled:opacity-60 inline-flex items-center gap-2"
-              >
-                <Database className="w-4 h-4" />
-                <span>
-                  {authorizingDb
-                    ? 'Authorizing...'
-                    : connectedFirebaseEmail
-                      ? 'Switch Administrator Account'
-                      : 'Authorize Database Once'}
-                </span>
-              </button>
-            </div>
-          ) : (
-            <>
+          <>
               {/* USERS LIST */}
               {page === 'users' && (
                 <div>
@@ -691,7 +621,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                 </div>
                 <button
                   type="button"
-                  disabled={statusUpdating || !hasFirestoreAdminAuth}
+                  disabled={statusUpdating}
                   onClick={() => void handleToggleAccountStatus()}
                   className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer ${
                     isProfileActive(selectedUser)
@@ -1030,7 +960,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             </div>
           )}
             </>
-          )}
         </main>
       </div>
 

@@ -15,7 +15,8 @@ import firebaseConfig from './firebase-applet-config.json' with { type: 'json' }
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin ONLY for ID token verification (requires no IAM roles)
+// Initialize Firebase Admin for learner ID token verification only.
+// Admin Console Firestore uses client SDK after password login (no ADC / Google popup).
 const adminApp = getApps().length
   ? getApp()
   : initializeApp({ projectId: firebaseConfig.projectId });
@@ -280,6 +281,26 @@ async function requireAuth(req: AuthRequest, res: Response, next: NextFunction) 
     console.error('Firebase token verification failed:', err);
     res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
   }
+}
+
+interface AdminSessionRequest extends Request {
+  adminEmail?: string;
+}
+
+function requireAdminSession(req: AdminSessionRequest, res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Admin authentication required.' });
+    return;
+  }
+  const token = header.slice('Bearer '.length).trim();
+  const verified = verifyAdminToken(token);
+  if (!verified) {
+    res.status(401).json({ error: 'Invalid or expired admin session.' });
+    return;
+  }
+  req.adminEmail = verified.email;
+  next();
 }
 
 const RATE_LIMIT_MAX = 3;

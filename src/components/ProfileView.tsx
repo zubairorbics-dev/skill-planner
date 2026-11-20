@@ -1,13 +1,42 @@
-import React, { useState } from 'react';
-import { LogOut, Pencil, Plus, RefreshCw, Save, X } from 'lucide-react';
-import { DayOfWeek, ExperienceLevel, UserProfile } from '../types/planner';
-import { updateUserProfile } from '../lib/firestoreService';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ChevronRight,
+  LogOut,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  X,
+} from 'lucide-react';
+import {
+  DayOfWeek,
+  ExperienceLevel,
+  Roadmap,
+  TaskItem,
+  UserProfile,
+} from '../types/planner';
+import {
+  fetchRoadmapTasks,
+  fetchUserArchivedRoadmaps,
+  updateUserProfile,
+} from '../lib/firestoreService';
 
 interface ProfileViewProps {
   profile: UserProfile;
+  hasActiveRoadmap?: boolean;
   onSignOut: () => Promise<void>;
   onRegenerateRoadmap: () => void;
   onToast: (msg: string) => void;
+}
+
+function formatRoadmapDate(createdAt: Roadmap['createdAt']): string {
+  const ms = createdAt?.toMillis?.();
+  if (!ms) return 'Unknown date';
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
@@ -21,6 +50,7 @@ const DAYS_OF_WEEK: DayOfWeek[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Su
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
   profile,
+  hasActiveRoadmap = false,
   onSignOut,
   onRegenerateRoadmap,
   onToast,
@@ -28,6 +58,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
+  const [archived, setArchived] = useState<Roadmap[]>([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  const [archivedError, setArchivedError] = useState<string | null>(null);
+  const [selectedArchived, setSelectedArchived] = useState<Roadmap | null>(null);
+  const [detailTasks, setDetailTasks] = useState<TaskItem[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const [fullName, setFullName] = useState(profile.fullName);
   const [education, setEducation] = useState(profile.education);
@@ -52,6 +89,53 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  const loadArchived = useCallback(async () => {
+    setArchivedLoading(true);
+    setArchivedError(null);
+    try {
+      const list = await fetchUserArchivedRoadmaps(profile.uid);
+      setArchived(list);
+    } catch {
+      setArchivedError('Could not load past roadmaps.');
+    } finally {
+      setArchivedLoading(false);
+    }
+  }, [profile.uid]);
+
+  useEffect(() => {
+    void loadArchived();
+  }, [loadArchived]);
+
+  useEffect(() => {
+    if (!selectedArchived) {
+      setDetailTasks([]);
+      return;
+    }
+    let active = true;
+    setDetailLoading(true);
+    fetchRoadmapTasks(profile.uid, selectedArchived.id)
+      .then((tasks) => {
+        if (active) setDetailTasks(tasks);
+      })
+      .catch(() => {
+        if (active) onToast('Could not load tasks for this past roadmap.');
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedArchived, profile.uid, onToast]);
+
+  const handleRegenerateClick = () => {
+    if (hasActiveRoadmap) {
+      setShowRegenConfirm(true);
+      return;
+    }
+    onRegenerateRoadmap();
+  };
 
   const startEditing = () => {
     setFullName(profile.fullName);
@@ -205,10 +289,67 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             )}
           </section>
 
+          <section className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Past roadmaps</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Archived plans from earlier regenerations. View only — no edits.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadArchived()}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Refresh past roadmaps"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {archivedLoading ? (
+              <p className="text-sm text-slate-500 py-4">Loading past roadmaps...</p>
+            ) : archivedError ? (
+              <p className="text-sm text-red-600 py-2">{archivedError}</p>
+            ) : archived.length === 0 ? (
+              <p className="text-sm text-slate-500 py-2">No past roadmaps yet.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100 mt-2">
+                {archived.map((rm) => {
+                  const total = rm.totalTasks || 0;
+                  const done = rm.completedTasks || 0;
+                  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                  return (
+                    <li key={rm.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedArchived(rm)}
+                        className="w-full py-3 flex items-center gap-3 text-left hover:bg-slate-50 rounded-lg px-1 cursor-pointer"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {rm.targetRole}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {formatRoadmapDate(rm.createdAt)} · {done}/{total} · {pct}%
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-slate-100 text-slate-600">
+                          Archived
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
               type="button"
-              onClick={onRegenerateRoadmap}
+              onClick={handleRegenerateClick}
               className="flex-1 min-h-[48px] px-5 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 text-white text-sm font-semibold shadow-sm shadow-indigo-500/20 hover:from-indigo-600 hover:to-indigo-700 transition-all inline-flex items-center justify-center gap-2 cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
@@ -435,6 +576,157 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           </div>
         </form>
+      )}
+
+      {/* Regenerate Confirmation Modal */}
+      {showRegenConfirm && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowRegenConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-slate-900 mb-1.5">
+              Generate a new roadmap?
+            </h3>
+            <p className="text-sm text-slate-500 leading-relaxed mb-6">
+              Your current roadmap will be saved in Past roadmaps. A new plan will
+              become active.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRegenConfirm(false)}
+                className="flex-1 min-h-[44px] rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold hover:bg-slate-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRegenConfirm(false);
+                  onRegenerateRoadmap();
+                }}
+                className="flex-1 min-h-[44px] rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 cursor-pointer"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archived roadmap detail (read-only) */}
+      {selectedArchived && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setSelectedArchived(null)}
+        >
+          <div
+            className="bg-white rounded-t-2xl sm:rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl border border-slate-200 p-5 sm:p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-indigo-600 mb-1">Past roadmap</p>
+                <h3 className="text-xl font-bold text-slate-900 truncate">
+                  {selectedArchived.targetRole}
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">{selectedArchived.goalText}</p>
+                <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-slate-500">
+                  <span className="px-2 py-1 rounded-md bg-slate-100 font-bold text-slate-600 uppercase tracking-wide">
+                    Archived
+                  </span>
+                  <span>{formatRoadmapDate(selectedArchived.createdAt)}</span>
+                  <span>·</span>
+                  <span>
+                    {selectedArchived.completedTasks}/{selectedArchived.totalTasks} tasks
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedArchived(null)}
+                className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer shrink-0"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs font-semibold text-slate-500 mb-4">
+              This plan is read-only. Task completion cannot be changed.
+            </p>
+
+            <div className="rounded-xl border border-slate-200 p-4 mb-4 bg-slate-50">
+              <p className="text-xs font-bold text-slate-700 mb-2">Skill gap analysis</p>
+              {selectedArchived.gapAnalysis.have.length > 0 ? (
+                <p className="text-xs text-slate-600 mb-1">
+                  <span className="font-semibold text-emerald-700">Have: </span>
+                  {selectedArchived.gapAnalysis.have.join(', ')}
+                </p>
+              ) : null}
+              {selectedArchived.gapAnalysis.improve.length > 0 ? (
+                <p className="text-xs text-slate-600 mb-1">
+                  <span className="font-semibold text-amber-700">Improve: </span>
+                  {selectedArchived.gapAnalysis.improve.join(', ')}
+                </p>
+              ) : null}
+              {selectedArchived.gapAnalysis.new.length > 0 ? (
+                <p className="text-xs text-slate-600">
+                  <span className="font-semibold text-indigo-700">New: </span>
+                  {selectedArchived.gapAnalysis.new.join(', ')}
+                </p>
+              ) : null}
+            </div>
+
+            {detailLoading ? (
+              <p className="text-sm text-slate-500 py-6 text-center">Loading phases...</p>
+            ) : (
+              <div className="space-y-4">
+                {selectedArchived.phases.map((phase) => {
+                  const phaseTasks = detailTasks.filter((t) => t.phaseId === phase.id);
+                  const done = phaseTasks.filter((t) => t.isCompleted).length;
+                  return (
+                    <section
+                      key={phase.id}
+                      className="rounded-xl border border-slate-200 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <h4 className="text-sm font-bold text-slate-900">{phase.title}</h4>
+                        <span className="text-xs text-slate-500 tabular-nums">
+                          {done}/{phaseTasks.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-3">
+                        {phase.durationWeeks} week{phase.durationWeeks === 1 ? '' : 's'}
+                      </p>
+                      <ul className="space-y-2">
+                        {phaseTasks.map((task) => (
+                          <li
+                            key={task.id}
+                            className={`text-sm ${
+                              task.isCompleted
+                                ? 'text-slate-400 line-through'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            {task.title}
+                            <span className="block text-[11px] text-slate-400 no-underline font-normal">
+                              Day {task.dayOffset} · {task.estMinutes} min · {task.type}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Logout Confirmation Modal */}

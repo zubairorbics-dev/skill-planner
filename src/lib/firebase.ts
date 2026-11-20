@@ -13,6 +13,12 @@ googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'zubair.orbics@gmail.com';
 
+/** Must match firestore.rules isPasswordPanelAdmin + .env ADMIN_EMAIL */
+export const PASSWORD_PANEL_ADMIN_EMAILS = [
+  'admin.skill@yopmail.com',
+  'admin@smartskillplanner.com',
+] as const;
+
 // Isolated secondary Firebase client for Admin Console so Learner App sign-out
 // or account switching never disconnects the Admin Console database session.
 const adminClientApp = initializeApp(firebaseConfig, 'admin-console');
@@ -28,6 +34,12 @@ adminSelectAccountProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
+export function isPasswordPanelAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  return PASSWORD_PANEL_ADMIN_EMAILS.some((e) => e === normalized);
+}
+
 export function isVerifiedBootstrappedAdmin(user: User | null | undefined): boolean {
   return Boolean(
     user?.emailVerified &&
@@ -35,11 +47,22 @@ export function isVerifiedBootstrappedAdmin(user: User | null | undefined): bool
   );
 }
 
+/** True when Admin Console Firebase Auth can read admin-scoped Firestore data. */
+export function isAdminFirestoreUser(user: User | null | undefined): boolean {
+  if (!user?.email) return false;
+  return (
+    isVerifiedBootstrappedAdmin(user) || isPasswordPanelAdminEmail(user.email)
+  );
+}
+
 export function getActiveAdminDb() {
-  if (isVerifiedBootstrappedAdmin(adminClientAuth.currentUser)) {
+  if (isAdminFirestoreUser(adminClientAuth.currentUser)) {
     return { targetDb: adminDb, targetAuth: adminClientAuth };
   }
-  return { targetDb: db, targetAuth: auth };
+  if (isAdminFirestoreUser(auth.currentUser)) {
+    return { targetDb: db, targetAuth: auth };
+  }
+  return { targetDb: adminDb, targetAuth: adminClientAuth };
 }
 
 export enum OperationType {

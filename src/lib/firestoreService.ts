@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   onSnapshot,
   orderBy,
@@ -61,7 +62,13 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
   const path = `profiles/${user.uid}`;
   try {
     const ref = doc(db, 'profiles', user.uid);
-    const snap = await getDoc(ref);
+    // Prefer server so admin deactivate is not masked by a stale cache
+    let snap;
+    try {
+      snap = await getDocFromServer(ref);
+    } catch {
+      snap = await getDoc(ref);
+    }
     if (snap.exists()) {
       return snap.data() as UserProfile;
     }
@@ -78,7 +85,7 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
       email,
       role: isAdminUser ? ('admin' as const) : ('user' as const),
       fullName: initialFullName,
-      education: "Bachelor's Degree",
+      education: '',
       fieldOfStudy: '',
       profession: '',
       experienceLevel: 'mid' as ExperienceLevel,
@@ -89,6 +96,7 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
       preferredDays: ['Mon', 'Wed', 'Fri'] as DayOfWeek[],
       onboardingCompleted: false,
       roadmapCount: 0,
+      accountStatus: 'active' as const,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -470,6 +478,38 @@ export async function fetchAllProfilesAdmin(): Promise<UserProfile[]> {
     return list;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path, targetAuth);
+  }
+}
+
+export async function setUserAccountStatusAdmin(
+  uid: string,
+  accountStatus: 'active' | 'inactive'
+): Promise<void> {
+  const path = `profiles/${uid}`;
+  const { targetDb, targetAuth } = getActiveAdminDb();
+  try {
+    const ref = doc(targetDb, 'profiles', uid);
+    await updateDoc(ref, {
+      accountStatus,
+      updatedAt: serverTimestamp(),
+    });
+    // Confirm the write landed (surfaces permission/schema failures clearly)
+    const verify = await getDocFromServer(ref);
+    const saved = verify.data()?.accountStatus;
+    if (saved !== accountStatus) {
+      throw new Error(
+        `Account status did not save (expected "${accountStatus}", got "${saved ?? 'missing'}"). ` +
+          'Deploy firestore.rules to the named database, then try again.'
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith('Account status did not save')
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, path, targetAuth);
   }
 }
 

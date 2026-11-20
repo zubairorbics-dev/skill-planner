@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -49,8 +50,18 @@ function sanitizeDays(days: DayOfWeek[]): DayOfWeek[] {
 }
 
 export async function ensureUserProfile(user: User): Promise<UserProfile> {
+  // Firestore rules read email_verified from the ID token — refresh so create is allowed
+  // after the user verifies their email (user.emailVerified can be true while token is stale).
+  await user.getIdToken(true);
+
   const ref = doc(db, 'profiles', user.uid);
-  const snap = await getDoc(ref);
+  // Prefer server so admin deactivate is not masked by a stale cache
+  let snap;
+  try {
+    snap = await getDocFromServer(ref);
+  } catch {
+    snap = await getDoc(ref);
+  }
   if (snap.exists()) {
     return snap.data() as UserProfile;
   }
@@ -61,12 +72,12 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
     100
   );
 
-  await setDoc(ref, {
+  const payload = {
     uid: user.uid,
     email,
-    role: 'user',
+    role: 'user' as const,
     fullName: initialFullName,
-    education: "Bachelor's Degree",
+    education: '',
     fieldOfStudy: '',
     profession: '',
     experienceLevel: 'mid' as ExperienceLevel,
@@ -77,22 +88,47 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
     preferredDays: ['Mon', 'Wed', 'Fri'] as DayOfWeek[],
     onboardingCompleted: false,
     roadmapCount: 0,
+    accountStatus: 'active' as const,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  try {
+    await setDoc(ref, payload);
+  } catch (err: unknown) {
+    // One retry after another token refresh (handles race right after email verify)
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('permission') || msg.includes('Permission')) {
+      await user.getIdToken(true);
+      await setDoc(ref, payload);
+    } else {
+      throw err;
+    }
+  }
 
   const createdSnap = await getDoc(ref);
+  if (!createdSnap.exists()) {
+    throw new Error('Profile was created but could not be read back. Please try again.');
+  }
   return createdSnap.data() as UserProfile;
 }
 
 export function subscribeUserProfile(
   uid: string,
-  onData: (profile: UserProfile | null) => void
+  onData: (profile: UserProfile | null) => void,
+  onError?: (err: Error) => void
 ): () => void {
   const ref = doc(db, 'profiles', uid);
-  return onSnapshot(ref, (snap) => {
-    onData(snap.exists() ? (snap.data() as UserProfile) : null);
-  });
+  return onSnapshot(
+    ref,
+    (snap) => {
+      onData(snap.exists() ? (snap.data() as UserProfile) : null);
+    },
+    (error) => {
+      if (onError) onError(error);
+      else console.warn('Profile subscription error:', error.message);
+    }
+  );
 }
 
 export async function updateUserProfileFields(
@@ -136,7 +172,8 @@ export async function updateUserProfileFields(
     payload.onboardingCompleted = Boolean(updates.onboardingCompleted);
   }
 
-  await updateDoc(ref, payload);
+  // Firestore UpdateData typing is stricter than our dynamic payload builder
+  await updateDoc(ref, payload as never);
 }
 
 export async function saveGeneratedRoadmapAndLog(params: {
@@ -182,11 +219,15 @@ export async function saveGeneratedRoadmapAndLog(params: {
             phaseId,
             milestoneId,
             userId: user.uid,
-            title: clampString(t.title, 200),
+            title: clampString(t.title, 200) || 'Learning task',
             type: t.type,
-            estMinutes: Math.min(600, Math.max(5, Math.round(t.est_minutes))),
-            dayOffset: Math.min(365, Math.max(1, Math.round(t.day_offset))),
-            resources: t.resources.slice(0, 5),
+            estMinutes: Math.min(600, Math.max(5, Math.round(t.est_minutes || 30))),
+            dayOffset: Math.min(365, Math.max(1, Math.round(t.day_offset || 1))),
+            resources: (t.resources ?? []).slice(0, 5).map((r) => ({
+              title: clampString(r.title, 160) || 'Resource',
+              url: r.url,
+              type: r.type,
+            })),
             isCompleted: false,
             completedAt: null,
             createdAt: serverTimestamp(),
@@ -281,39 +322,55 @@ export async function saveGeneratedRoadmapAndLog(params: {
 
 export function subscribeActiveRoadmap(
   uid: string,
-  onData: (roadmap: Roadmap | null) => void
+  onData: (roadmap: Roadmap | null) => void,
+  onError?: (err: Error) => void
 ): () => void {
   const q = query(
     collection(db, 'roadmaps'),
     where('userId', '==', uid),
     where('status', '==', 'active')
   );
-  return onSnapshot(q, (snap) => {
-    if (snap.empty) {
-      onData(null);
-      return;
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (snap.empty) {
+        onData(null);
+        return;
+      }
+      const docs = snap.docs.map((d) => d.data() as Roadmap);
+      docs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      onData(docs[0]);
+    },
+    (error) => {
+      if (onError) onError(error);
+      else console.warn('Roadmap subscription error:', error.message);
     }
-    const docs = snap.docs.map((d) => d.data() as Roadmap);
-    docs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
-    onData(docs[0]);
-  });
+  );
 }
 
 export function subscribeRoadmapTasks(
   uid: string,
   roadmapId: string,
-  onData: (tasks: TaskItem[]) => void
+  onData: (tasks: TaskItem[]) => void,
+  onError?: (err: Error) => void
 ): () => void {
   const q = query(
     collection(db, 'tasks'),
     where('userId', '==', uid),
     where('roadmapId', '==', roadmapId)
   );
-  return onSnapshot(q, (snap) => {
-    const items = snap.docs.map((d) => d.data() as TaskItem);
-    items.sort((a, b) => a.dayOffset - b.dayOffset || a.title.localeCompare(b.title));
-    onData(items);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items = snap.docs.map((d) => d.data() as TaskItem);
+      items.sort((a, b) => a.dayOffset - b.dayOffset || a.title.localeCompare(b.title));
+      onData(items);
+    },
+    (error) => {
+      if (onError) onError(error);
+      else console.warn('Tasks subscription error:', error.message);
+    }
+  );
 }
 
 export async function toggleTaskCompletion(

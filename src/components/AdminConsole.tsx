@@ -12,11 +12,18 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { AiLogEntry, Roadmap, UserProfile } from '../types/planner';
+import {
+  AccountStatus,
+  AiLogEntry,
+  isProfileActive,
+  Roadmap,
+  UserProfile,
+} from '../types/planner';
 import {
   fetchAllAiLogsAdmin,
   fetchAllProfilesAdmin,
   fetchAllRoadmapsAdmin,
+  setUserAccountStatusAdmin,
 } from '../lib/firestoreService';
 
 interface AdminConsoleProps {
@@ -70,6 +77,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [authorizingDb, setAuthorizingDb] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Users table controls
@@ -121,6 +129,43 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
       );
     } finally {
       setAuthorizingDb(false);
+    }
+  };
+
+  const handleToggleAccountStatus = async () => {
+    if (!selectedUser || statusUpdating) return;
+    const nextStatus: AccountStatus = isProfileActive(selectedUser)
+      ? 'inactive'
+      : 'active';
+    const actionLabel = nextStatus === 'inactive' ? 'deactivate' : 'reactivate';
+    const confirmed = window.confirm(
+      `Are you sure you want to ${actionLabel} ${selectedUser.fullName} (${selectedUser.email})?` +
+        (nextStatus === 'inactive'
+          ? '\n\nThey will not be able to use the learner app until reactivated.'
+          : '')
+    );
+    if (!confirmed) return;
+
+    setStatusUpdating(true);
+    setError(null);
+    try {
+      await setUserAccountStatusAdmin(selectedUser.uid, nextStatus);
+      const updated: UserProfile = {
+        ...selectedUser,
+        accountStatus: nextStatus,
+      };
+      setSelectedUser(updated);
+      setProfiles((prev) =>
+        prev.map((p) => (p.uid === selectedUser.uid ? updated : p))
+      );
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Unable to ${actionLabel} this user right now.`
+      );
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -499,6 +544,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                             <ArrowUpDown className="w-3 h-3" />
                           </button>
                         </th>
+                        <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3 text-right">
                           <button
                             type="button"
@@ -515,20 +561,21 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                       {loading ? (
                         Array.from({ length: 4 }).map((_, i) => (
                           <tr key={i}>
-                            <td colSpan={6} className="px-4 py-4">
+                            <td colSpan={7} className="px-4 py-4">
                               <div className="h-4 bg-slate-100 rounded animate-pulse" />
                             </td>
                           </tr>
                         ))
                       ) : paginatedUsers.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                          <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                             No users match your current filter.
                           </td>
                         </tr>
                       ) : (
                         paginatedUsers.map((u) => {
                           const count = roadmapCountByUser.get(u.uid) ?? u.roadmapCount ?? 0;
+                          const active = isProfileActive(u);
                           return (
                             <tr
                               key={u.uid}
@@ -552,6 +599,17 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                               </td>
                               <td className="px-4 py-3.5 text-right font-mono tabular-nums text-slate-900">
                                 {count}
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                    active
+                                      ? 'bg-emerald-50 text-emerald-700'
+                                      : 'bg-red-50 text-red-700'
+                                  }`}
+                                >
+                                  {active ? 'Active' : 'Inactive'}
+                                </span>
                               </td>
                               <td className="px-4 py-3.5 text-right text-xs text-slate-500 tabular-nums whitespace-nowrap">
                                 {formatDate(u.createdAt)}
@@ -600,7 +658,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           {/* USER DETAIL DRILL-DOWN */}
           {page === 'user-detail' && selectedUser && (
             <div className="space-y-6">
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-4 flex-wrap">
                 <div className="w-16 h-16 rounded-full bg-indigo-100 text-indigo-700 font-extrabold text-xl flex items-center justify-center shrink-0">
                   {selectedUser.fullName
                     .split(/\s+/)
@@ -609,10 +667,21 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                     .toUpperCase()
                     .slice(0, 2)}
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-slate-900">
-                    {selectedUser.fullName}
-                  </h1>
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h1 className="text-2xl font-bold text-slate-900">
+                      {selectedUser.fullName}
+                    </h1>
+                    <span
+                      className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                        isProfileActive(selectedUser)
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-red-50 text-red-700'
+                      }`}
+                    >
+                      {isProfileActive(selectedUser) ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
                   <p className="text-sm text-slate-500 font-mono">{selectedUser.email}</p>
                   <p className="text-xs text-slate-500 mt-1.5 capitalize tabular-nums">
                     {selectedUser.experienceLevel} ·{' '}
@@ -620,6 +689,22 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                     Joined {formatDate(selectedUser.createdAt)}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  disabled={statusUpdating || !hasFirestoreAdminAuth}
+                  onClick={() => void handleToggleAccountStatus()}
+                  className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer ${
+                    isProfileActive(selectedUser)
+                      ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                  }`}
+                >
+                  {statusUpdating
+                    ? 'Updating...'
+                    : isProfileActive(selectedUser)
+                      ? 'Deactivate User'
+                      : 'Activate User'}
+                </button>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

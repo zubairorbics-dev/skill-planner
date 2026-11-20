@@ -49,11 +49,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const currentDay = getRoadmapCurrentDayOffset(roadmap);
 
   const todaysTasks = useMemo(() => {
-    const exactToday = tasks.filter((t) => t.dayOffset === currentDay);
-    if (exactToday.length > 0) return exactToday;
-    // If today has no scheduled dayOffset, surface up to 4 next incomplete tasks
-    const upcomingIncomplete = tasks.filter((t) => !t.isCompleted).slice(0, 4);
-    return upcomingIncomplete;
+    const exactToday = tasks.filter(
+      (t) => !t.isCompleted && t.dayOffset === currentDay
+    );
+    if (exactToday.length > 0) return exactToday.slice(0, 4);
+    // Prefer overdue past tasks over locked upcoming ones
+    return tasks
+      .filter((t) => !t.isCompleted && t.dayOffset < currentDay)
+      .slice(0, 4);
   }, [tasks, currentDay]);
 
   if (!roadmap) {

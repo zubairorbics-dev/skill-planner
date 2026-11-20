@@ -4,6 +4,10 @@ export type ExperienceLevel = 'student' | 'junior' | 'mid' | 'senior';
 export type DayOfWeek = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
 export type TaskType = 'theory' | 'practice' | 'project';
 export type ResourceType = 'article' | 'video' | 'course';
+export type AccountStatus = 'active' | 'inactive';
+
+export const INACTIVE_ACCOUNT_MESSAGE =
+  'Your account has been deactivated by an administrator. Please contact support for help.';
 
 export interface UserProfile {
   uid: string;
@@ -21,8 +25,16 @@ export interface UserProfile {
   preferredDays: DayOfWeek[];
   onboardingCompleted: boolean;
   roadmapCount: number;
+  /** Missing on legacy profiles is treated as active. */
+  accountStatus?: AccountStatus;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
+}
+
+export function isProfileActive(
+  profile: Pick<UserProfile, 'accountStatus'> | null | undefined
+): boolean {
+  return !profile?.accountStatus || profile.accountStatus === 'active';
 }
 
 export interface GapAnalysis {

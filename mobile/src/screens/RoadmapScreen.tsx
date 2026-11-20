@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,13 +10,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePlannerStore } from '../store/usePlannerStore';
 import { toggleTaskCompletion } from '../services/firestoreService';
 import { TaskCard } from '../components/TaskCard';
+import { AppScreen } from '../components/AppScreen';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { TaskItem } from '../types/planner';
-import { colors } from '../theme';
+import { colors, radii, shadows, spacing } from '../theme';
 
 export const RoadmapScreen: React.FC = () => {
   const { roadmap, tasks, togglingTaskId, setTogglingTaskId, setShowOnboarding } =
     usePlannerStore();
-  const [expandedPhaseId, setExpandedPhaseId] = useState<string | null>('phase_1');
+  const [expandedPhaseId, setExpandedPhaseId] = useState<string | null>(
+    roadmap?.phases?.[0]?.id ?? 'phase_1'
+  );
 
   const handleToggle = async (task: TaskItem) => {
     if (!roadmap || togglingTaskId) return;
@@ -31,27 +34,40 @@ export const RoadmapScreen: React.FC = () => {
 
   if (!roadmap) {
     return (
-      <SafeAreaView style={styles.emptySafe}>
-        <Text style={styles.emptyTitle}>No roadmap generated yet</Text>
-        <Pressable
-          style={styles.primaryBtn}
-          onPress={() => setShowOnboarding(true)}
-        >
-          <Text style={styles.primaryBtnText}>Generate Roadmap</Text>
-        </Pressable>
-      </SafeAreaView>
+      <AppScreen edges={['top', 'left', 'right']} style={styles.emptySafe}>
+        <View style={styles.emptyCard}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="map-outline" size={26} color={colors.primary} />
+          </View>
+          <Text style={styles.emptyTitle}>No roadmap yet</Text>
+          <Text style={styles.emptySub}>
+            Generate a personalized plan to unlock phases, milestones, and tasks.
+          </Text>
+          <Pressable
+            style={styles.primaryBtn}
+            onPress={() => setShowOnboarding(true)}
+          >
+            <Text style={styles.primaryBtnText}>Generate Roadmap</Text>
+          </Pressable>
+        </View>
+      </AppScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>{roadmap.targetRole}</Text>
-        <Text style={styles.subtitle}>{roadmap.goalText}</Text>
+    <AppScreen edges={['top', 'left', 'right']}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHeader
+          eyebrow="Learning path"
+          title={roadmap.targetRole}
+          subtitle={roadmap.goalText}
+        />
 
-        {/* Skill Gap Summary */}
         <View style={styles.gapCard}>
-          <Text style={styles.gapHeading}>Skill Gap Analysis</Text>
+          <Text style={styles.gapHeading}>Skill gap analysis</Text>
           {roadmap.gapAnalysis.have.length > 0 ? (
             <Text style={styles.gapLine}>
               <Text style={[styles.gapLabel, { color: colors.success }]}>Have: </Text>
@@ -72,7 +88,6 @@ export const RoadmapScreen: React.FC = () => {
           ) : null}
         </View>
 
-        {/* Accordion of Phases */}
         {roadmap.phases.map((phase) => {
           const phaseTasks = tasks.filter((t) => t.phaseId === phase.id);
           const doneCount = phaseTasks.filter((t) => t.isCompleted).length;
@@ -91,7 +106,7 @@ export const RoadmapScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.phaseTitle}>{phase.title}</Text>
                   <Text style={styles.phaseMeta}>
-                    {phase.durationWeeks} weeks · {doneCount}/{phaseTasks.length} completed ({pct}%)
+                    {phase.durationWeeks} weeks · {doneCount}/{phaseTasks.length} · {pct}%
                   </Text>
                   <View style={styles.progressTrack}>
                     <View style={[styles.progressFill, { width: `${pct}%` }]} />
@@ -129,51 +144,95 @@ export const RoadmapScreen: React.FC = () => {
           );
         })}
       </ScrollView>
-    </SafeAreaView>
+    </AppScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  container: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 36,
+  },
   emptySafe: {
-    flex: 1,
-    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 16 },
+  emptyCard: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 24,
+    ...shadows.soft,
+  },
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  emptySub: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: 6,
+    marginBottom: 18,
+    lineHeight: 20,
+  },
   primaryBtn: {
-    paddingHorizontal: 20,
-    height: 46,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: radii.md,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-  container: { padding: 20, paddingBottom: 32 },
-  title: { fontSize: 22, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 4, marginBottom: 18, lineHeight: 20 },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   gapCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 16,
     marginBottom: 18,
     gap: 6,
+    ...shadows.soft,
   },
-  gapHeading: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 4 },
-  gapLine: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
-  gapLabel: { fontWeight: '700' },
+  gapHeading: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  gapLine: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 19,
+  },
+  gapLabel: {
+    fontWeight: '700',
+  },
   phaseCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
     marginBottom: 14,
     overflow: 'hidden',
+    ...shadows.soft,
   },
   phaseHeader: {
     padding: 16,
@@ -181,7 +240,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  phaseTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  phaseTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
   phaseMeta: {
     fontSize: 12,
     color: colors.textMuted,
@@ -195,14 +258,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginTop: 10,
   },
-  progressFill: { height: '100%', backgroundColor: colors.primary },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
   phaseBody: {
     paddingHorizontal: 14,
     paddingBottom: 14,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
   },
-  milestoneBlock: { marginTop: 14 },
+  milestoneBlock: {
+    marginTop: 14,
+  },
   milestoneTitle: {
     fontSize: 13,
     fontWeight: '700',

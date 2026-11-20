@@ -72,9 +72,24 @@ export async function requestRoadmapGeneration(
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    const err = new Error(
-      data?.error || `Failed to generate roadmap (HTTP ${response.status}). Please try again.`
-    ) as GenerateRoadmapError;
+    let message =
+      typeof data?.error === 'string' && data.error.trim()
+        ? data.error.trim()
+        : `Failed to generate roadmap (HTTP ${response.status}). Please try again.`;
+    if (
+      message.startsWith('{') ||
+      message.includes('{{code') ||
+      message.length > 220
+    ) {
+      const lower = message.toLowerCase();
+      message =
+        lower.includes('503') ||
+        lower.includes('high demand') ||
+        lower.includes('overloaded')
+          ? 'The AI model is busy right now. Please try again in a moment.'
+          : 'We could not build a valid roadmap right now. Please try again.';
+    }
+    const err = new Error(message) as GenerateRoadmapError;
     err.status = response.status;
     err.prompt = data?.prompt;
     err.promptSummary = data?.promptSummary;

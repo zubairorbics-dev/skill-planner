@@ -447,34 +447,43 @@ async function startServer() {
       return;
     }
 
-    const attempts: { model: string; thinkingLevel: ThinkingLevel }[] = [
+    // Prefer Studio models first, then stable public Flash models as capacity fallback.
+    const attempts: { model: string; thinkingLevel?: ThinkingLevel }[] = [
       { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: 'gemini-2.5-flash-lite' },
+      { model: 'gemini-2.5-flash' },
+      { model: 'gemini-2.0-flash' },
       { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
     ];
 
-    let lastError = 'Unknown generation error';
+    let lastErrorKind: 'capacity' | 'schema' | 'empty' | 'other' = 'other';
+    let lastInternalError = 'Unknown generation error';
+
     for (let idx = 0; idx < attempts.length; idx++) {
       const { model, thinkingLevel } = attempts[idx];
       const attemptNum = idx + 1;
       try {
         const contents =
-          attemptNum === 1
-            ? prompt
-            : `${prompt}\n\nYour last response was not valid JSON matching the required schema (${lastError}). Return ONLY valid JSON.`;
+          lastErrorKind === 'schema'
+            ? `${prompt}\n\nYour last response was not valid JSON matching the required schema. Return ONLY valid JSON.`
+            : prompt;
 
         const response = await ai.models.generateContent({
           model,
           contents,
           config: {
             responseMimeType: 'application/json',
-            thinkingConfig: { thinkingLevel },
-            abortSignal: AbortSignal.timeout(25000),
+            ...(thinkingLevel
+              ? { thinkingConfig: { thinkingLevel } }
+              : {}),
+            abortSignal: AbortSignal.timeout(28000),
           },
         });
 
         const rawText = (response.text ?? '').trim();
         if (!rawText) {
-          lastError = 'Gemini returned an empty response.';
+          lastErrorKind = 'empty';
+          lastInternalError = 'empty response';
           continue;
         }
 
@@ -487,17 +496,19 @@ async function startServer() {
         try {
           parsedJson = JSON.parse(cleaned);
         } catch {
-          lastError = 'Gemini returned malformed JSON.';
+          lastErrorKind = 'schema';
+          lastInternalError = 'malformed JSON';
           continue;
         }
 
         const validated = roadmapOutputSchema.safeParse(parsedJson);
         if (!validated.success) {
-          lastError = validated.error.issues
+          lastErrorKind = 'schema';
+          lastInternalError = validated.error.issues
             .slice(0, 3)
             .map((i) => `${i.path.join('.')}: ${i.message}`)
             .join('; ');
-          console.warn(`Roadmap Zod validation failed (${model}):`, lastError);
+          console.warn(`Roadmap Zod validation failed (${model}):`, lastInternalError);
           continue;
         }
 
@@ -514,32 +525,58 @@ async function startServer() {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`Gemini generation attempt ${attemptNum} (${model}) failed:`, errMsg);
-        if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-          res.status(429).json({
-            error: 'AI generation is temporarily busy due to rate limits. Please wait a moment and try again.',
-            prompt,
-            promptSummary,
-          });
-          return;
-        }
+
         if (
           errMsg.includes('403') ||
           errMsg.includes('API_KEY_INVALID') ||
           errMsg.includes('PERMISSION_DENIED')
         ) {
           res.status(502).json({
-            error: 'AI service key configuration error. Please check your Gemini API key in Settings > Secrets.',
+            error:
+              'AI service key configuration error. Please check your Gemini API key in Settings > Secrets.',
             prompt,
             promptSummary,
           });
           return;
         }
-        lastError = errMsg;
+
+        const isCapacity =
+          errMsg.includes('503') ||
+          errMsg.includes('UNAVAILABLE') ||
+          errMsg.includes('high demand') ||
+          errMsg.includes('overloaded') ||
+          errMsg.includes('Overloaded');
+        const isRateLimited =
+          errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
+
+        if (isCapacity || isRateLimited) {
+          lastErrorKind = 'capacity';
+          lastInternalError = isRateLimited ? 'rate limited' : 'model capacity';
+          // Brief pause before next fallback model
+          if (idx < attempts.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 600 + idx * 400));
+          }
+          continue;
+        }
+
+        lastErrorKind = 'other';
+        lastInternalError = errMsg.slice(0, 200);
       }
     }
 
-    res.status(502).json({
-      error: `We could not build a valid roadmap right now (${lastError}). Please retry.`,
+    const userError =
+      lastErrorKind === 'capacity'
+        ? 'The AI model is busy right now. Please try again in a moment.'
+        : lastErrorKind === 'schema' || lastErrorKind === 'empty'
+          ? 'We could not build a valid roadmap from the AI response. Please try again.'
+          : 'We could not build a valid roadmap right now. Please try again.';
+
+    console.error(
+      `Roadmap generation exhausted fallbacks for ${uid}: kind=${lastErrorKind} detail=${lastInternalError}`
+    );
+
+    res.status(lastErrorKind === 'capacity' ? 503 : 502).json({
+      error: userError,
       prompt,
       promptSummary,
     });

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
@@ -10,6 +9,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   onAuthStateChanged,
@@ -32,11 +32,17 @@ import { RoadmapScreen } from './src/screens/RoadmapScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
 import { ProgressScreen } from './src/screens/ProgressScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
-import { colors } from './src/theme';
+import { AppScreen } from './src/components/AppScreen';
+import {
+  INACTIVE_ACCOUNT_MESSAGE,
+  isProfileActive,
+} from './src/types/planner';
+import { colors, radii, shadows } from './src/theme';
 
 const Tab = createBottomTabNavigator();
 
-export default function App() {
+function AppContent() {
+  const insets = useSafeAreaInsets();
   const {
     user,
     authReady,
@@ -55,6 +61,9 @@ export default function App() {
 
   const [checkingVerify, setCheckingVerify] = useState(false);
   const [verifyNotice, setVerifyNotice] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileRetryKey, setProfileRetryKey] = useState(0);
+  const [inactiveNotice, setInactiveNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
@@ -62,6 +71,7 @@ export default function App() {
       setAuthReady(true);
       if (!firebaseUser) {
         resetUserData();
+        setProfileError(null);
       }
     });
     return unsub;
@@ -73,47 +83,88 @@ export default function App() {
     let unsubProfile: (() => void) | null = null;
 
     setProfileLoading(true);
-    ensureUserProfile(user)
-      .then((initialProfile) => {
+    setProfileError(null);
+
+    (async () => {
+      try {
+        // Critical: rules use token.email_verified, not the client User flag alone
+        await user.getIdToken(true);
+        const initialProfile = await ensureUserProfile(user);
         if (!active) return;
+        if (!isProfileActive(initialProfile)) {
+          setInactiveNotice(INACTIVE_ACCOUNT_MESSAGE);
+          setProfileLoading(false);
+          await signOut(auth);
+          return;
+        }
         setProfile(initialProfile);
         setProfileLoading(false);
         unsubProfile = subscribeUserProfile(user.uid, (nextProfile) => {
-          if (nextProfile) setProfile(nextProfile);
+          if (!nextProfile) return;
+          if (!isProfileActive(nextProfile)) {
+            setInactiveNotice(INACTIVE_ACCOUNT_MESSAGE);
+            void signOut(auth);
+            return;
+          }
+          setProfile(nextProfile);
         });
-      })
-      .catch(() => {
-        if (active) setProfileLoading(false);
-      });
+      } catch (err: unknown) {
+        console.error('Failed to load user profile:', err);
+        if (!active) return;
+        setProfileLoading(false);
+        setProfileError(
+          err instanceof Error
+            ? err.message
+            : 'Missing or insufficient permissions while loading your profile.'
+        );
+      }
+    })();
 
     return () => {
       active = false;
       unsubProfile?.();
     };
-  }, [user, user?.emailVerified, setProfile, setProfileLoading]);
+  }, [user, user?.emailVerified, profileRetryKey, setProfile, setProfileLoading]);
 
   useEffect(() => {
-    if (!user || !user.emailVerified) return;
-    return subscribeActiveRoadmap(user.uid, (rm) => {
-      setRoadmap(rm);
-      if (!rm) setTasks([]);
-    });
-  }, [user, user?.emailVerified, setRoadmap, setTasks]);
+    if (!user || !user.emailVerified || !profile || !isProfileActive(profile)) return;
+    return subscribeActiveRoadmap(
+      user.uid,
+      (rm) => {
+        setRoadmap(rm);
+        if (!rm) setTasks([]);
+      },
+      (err) => console.warn('Roadmap subscription error:', err.message)
+    );
+  }, [user, user?.emailVerified, profile?.uid, profile?.accountStatus, setRoadmap, setTasks]);
 
   useEffect(() => {
-    if (!user || !user.emailVerified || !roadmap) return;
-    return subscribeRoadmapTasks(user.uid, roadmap.id, (items) => {
-      setTasks(items);
-    });
-  }, [user, user?.emailVerified, roadmap?.id, setTasks]);
+    if (!user || !user.emailVerified || !profile || !isProfileActive(profile) || !roadmap)
+      return;
+    return subscribeRoadmapTasks(
+      user.uid,
+      roadmap.id,
+      (items) => {
+        setTasks(items);
+      },
+      (err) => console.warn('Tasks subscription error:', err.message)
+    );
+  }, [
+    user,
+    user?.emailVerified,
+    profile?.uid,
+    profile?.accountStatus,
+    roadmap?.id,
+    setTasks,
+  ]);
 
   if (!authReady || (user && user.emailVerified && profileLoading)) {
     return (
-      <SafeAreaView style={styles.center}>
+      <AppScreen style={styles.center}>
         <StatusBar style="dark" />
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.loadingText}>Loading Smart Skill Planner...</Text>
-      </SafeAreaView>
+      </AppScreen>
     );
   }
 
@@ -121,21 +172,25 @@ export default function App() {
     return (
       <>
         <StatusBar style="dark" />
-        <AuthScreen />
+        <AuthScreen
+          initialError={inactiveNotice}
+          onConsumeInitialError={() => setInactiveNotice(null)}
+        />
       </>
     );
   }
 
-  // Firestore security rules require a verified email before writing profile/roadmaps
   if (!user.emailVerified) {
     return (
-      <SafeAreaView style={styles.center}>
+      <AppScreen style={styles.center}>
         <StatusBar style="dark" />
         <View style={styles.verifyCard}>
+          <View style={styles.verifyIcon}>
+            <Ionicons name="mail-unread-outline" size={28} color={colors.primary} />
+          </View>
           <Text style={styles.verifyTitle}>Verify your email</Text>
           <Text style={styles.verifyText}>
-            We sent a verification link to {user.email}. Click the link in your inbox,
-            then tap below to enter Smart Skill Planner.
+            We sent a verification link to {user.email}. Open it, then continue below.
           </Text>
           {verifyNotice ? <Text style={styles.verifyNotice}>{verifyNotice}</Text> : null}
           <Pressable
@@ -146,8 +201,12 @@ export default function App() {
               setVerifyNotice(null);
               try {
                 await reload(user);
-                if (auth.currentUser?.emailVerified) {
-                  setUser({ ...auth.currentUser } as typeof user);
+                const fresh = auth.currentUser;
+                if (fresh?.emailVerified) {
+                  // Force a new ID token so Firestore sees email_verified=true
+                  await fresh.getIdToken(true);
+                  setUser(fresh);
+                  setProfileRetryKey((k) => k + 1);
                 } else {
                   setVerifyNotice('Email not verified yet. Please check your inbox.');
                 }
@@ -169,11 +228,35 @@ export default function App() {
           >
             <Text style={styles.secondaryBtnText}>Resend Verification Link</Text>
           </Pressable>
-          <Pressable onPress={() => void signOut(auth)} style={{ marginTop: 12 }}>
-            <Text style={styles.signOutLink}>Sign out</Text>
+        </View>
+      </AppScreen>
+    );
+  }
+
+  if (user.emailVerified && !profile && !profileLoading) {
+    return (
+      <AppScreen style={styles.center}>
+        <StatusBar style="dark" />
+        <View style={styles.verifyCard}>
+          <View style={styles.verifyIcon}>
+            <Ionicons name="cloud-offline-outline" size={28} color={colors.danger} />
+          </View>
+          <Text style={styles.verifyTitle}>Profile sync failed</Text>
+          <Text style={styles.verifyText}>
+            {profileError ||
+              'We could not create your learner profile. Check your connection and try again.'}
+          </Text>
+          <Pressable
+            style={styles.primaryBtn}
+            onPress={() => {
+              setProfileError(null);
+              setProfileRetryKey((k) => k + 1);
+            }}
+          >
+            <Text style={styles.primaryBtnText}>Retry</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </AppScreen>
     );
   }
 
@@ -197,9 +280,9 @@ export default function App() {
           tabBarStyle: {
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            height: 62,
-            paddingBottom: 8,
-            paddingTop: 6,
+            height: 58 + Math.max(insets.bottom, 8),
+            paddingBottom: Math.max(insets.bottom, 8),
+            paddingTop: 8,
           },
           tabBarLabelStyle: {
             fontSize: 11,
@@ -213,7 +296,13 @@ export default function App() {
               Progress: 'stats-chart-outline',
               Profile: 'person-outline',
             };
-            return <Ionicons name={icons[route.name] || 'ellipse-outline'} size={size} color={color} />;
+            return (
+              <Ionicons
+                name={icons[route.name] || 'ellipse-outline'}
+                size={size}
+                color={color}
+              />
+            );
           },
         })}
       >
@@ -227,10 +316,16 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   center: {
-    flex: 1,
-    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -244,20 +339,30 @@ const styles = StyleSheet.create({
   verifyCard: {
     width: '100%',
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 22,
+    padding: 24,
     alignItems: 'center',
+    ...shadows.soft,
   },
-  verifyTitle: { fontSize: 20, fontWeight: '800', color: colors.text },
+  verifyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  verifyTitle: { fontSize: 22, fontWeight: '800', color: colors.text },
   verifyText: {
     fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
     marginTop: 8,
-    marginBottom: 16,
+    marginBottom: 18,
   },
   verifyNotice: {
     fontSize: 13,
@@ -268,8 +373,8 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     width: '100%',
-    height: 48,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: 14,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -278,13 +383,13 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
   secondaryBtn: {
     width: '100%',
-    height: 46,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
   },
   secondaryBtnText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
-  signOutLink: { color: colors.danger, fontSize: 13, fontWeight: '600' },
 });

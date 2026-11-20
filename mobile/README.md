@@ -2,10 +2,12 @@
 
 This folder contains the standalone **React Native (Expo SDK 52 + TypeScript + React Navigation + Zustand + Axios)** mobile app for learners. It connects directly to your live Express AI backend (`/api/roadmaps/generate`) and your shared Firebase Firestore database (`ai-studio-ce529039-d1ac-4548-978e-779165263fd7`), so every learner who signs up and generates a roadmap on Android immediately appears in your Web Admin Panel (`/admin`).
 
-## One-Time Firebase Setup (Required for Mobile Email/Password Login)
+## One-Time Firebase Setup (Email/Password)
 1. Open the [Firebase Console](https://console.firebase.google.com/project/gen-lang-client-0637292374/authentication/providers) for project `gen-lang-client-0637292374`.
 2. Go to **Authentication → Sign-in method**.
-3. Click **Add new provider → Email/Password**, toggle **Enable**, and click **Save**.
+3. Enable **Email/Password**.
+
+New accounts require a strong password: 8+ characters with uppercase, lowercase, a number, and a special character.
 
 ## Setup
 ```bash
@@ -14,10 +16,16 @@ npm install
 cp .env.example .env
 ```
 
-By default, `.env.example` already points `EXPO_PUBLIC_API_URL` to your deployed backend:
+Set `EXPO_PUBLIC_API_URL` to a backend that actually serves `/api/roadmaps/generate` as JSON.
+
+For local development (phone/emulator on the same Wi‑Fi as this PC):
 ```
-EXPO_PUBLIC_API_URL=https://ais-pre-oy5dihwswdppnwg52a74h2-6339083860.asia-southeast1.run.app
+EXPO_PUBLIC_API_URL=http://192.168.20.15:3000
 ```
+
+Then in the repo root run `npm run dev` so Express listens on `0.0.0.0:3000`.
+
+> Note: the old AI Studio host `ais-pre-...run.app` returns **404** for `/api/*`, so roadmap generation will fail if the app still points there. Use your LAN IP for dev, or a real public deploy for production APKs.
 
 ---
 

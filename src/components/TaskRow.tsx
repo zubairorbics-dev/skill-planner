@@ -1,11 +1,12 @@
 import React from 'react';
-import { BookOpen, Check, ExternalLink, PlayCircle, GraduationCap } from 'lucide-react';
+import { BookOpen, Check, ExternalLink, Lock, PlayCircle, GraduationCap } from 'lucide-react';
 import { TaskItem, TaskType } from '../types/planner';
 
 interface TaskRowProps {
   task: TaskItem;
   onToggle: (task: TaskItem) => void;
   disabled?: boolean;
+  locked?: boolean;
   showResources?: boolean;
 }
 
@@ -19,6 +20,7 @@ export const TaskRow: React.FC<TaskRowProps> = ({
   task,
   onToggle,
   disabled = false,
+  locked = false,
   showResources = false,
 }) => {
   const typeMeta = TYPE_STYLES[task.type] ?? TYPE_STYLES.theory;
@@ -32,24 +34,36 @@ export const TaskRow: React.FC<TaskRowProps> = ({
   return (
     <div
       className={`group flex items-start gap-3.5 py-3.5 border-b border-slate-100 last:border-b-0 transition-colors ${
-        task.isCompleted ? 'opacity-85' : ''
+        task.isCompleted ? 'opacity-85' : locked ? 'opacity-70' : ''
       }`}
     >
       <button
         type="button"
         disabled={disabled}
         onClick={() => onToggle(task)}
-        aria-label={task.isCompleted ? `Mark "${task.title}" incomplete` : `Mark "${task.title}" complete`}
+        aria-label={
+          locked
+            ? `Upcoming task "${task.title}" is locked`
+            : task.isCompleted
+              ? `Mark "${task.title}" incomplete`
+              : `Mark "${task.title}" complete`
+        }
         className="min-w-[44px] min-h-[44px] -m-2.5 flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
       >
         <span
           className={`w-[22px] h-[22px] rounded-md border-2 flex items-center justify-center transition-all duration-150 ${
             task.isCompleted
               ? 'bg-emerald-500 border-emerald-500 text-white scale-100'
-              : 'bg-white border-slate-300 group-hover:border-indigo-400'
+              : locked
+                ? 'bg-slate-50 border-slate-300 text-slate-400'
+                : 'bg-white border-slate-300 group-hover:border-indigo-400'
           }`}
         >
-          {task.isCompleted && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+          {task.isCompleted ? (
+            <Check className="w-3.5 h-3.5 stroke-[3]" />
+          ) : locked ? (
+            <Lock className="w-3 h-3" />
+          ) : null}
         </span>
       </button>
 

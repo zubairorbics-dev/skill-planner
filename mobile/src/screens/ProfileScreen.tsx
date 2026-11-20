@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { usePlannerStore } from '../store/usePlannerStore';
 import { updateUserProfileFields } from '../services/firestoreService';
-import { colors } from '../theme';
+import { AppScreen } from '../components/AppScreen';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { colors, radii, shadows, spacing } from '../theme';
 
 export const ProfileScreen: React.FC = () => {
   const { user, profile, setShowOnboarding } = usePlannerStore();
@@ -48,15 +51,36 @@ export const ProfileScreen: React.FC = () => {
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut(auth);
+  const handleSignOut = () => {
+    Alert.alert('Sign out?', 'You can sign back in anytime.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: () => void signOut(auth),
+      },
+    ]);
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Profile</Text>
-        <Text style={styles.subtitle}>{profile?.email}</Text>
+    <AppScreen edges={['top', 'left', 'right']}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHeader
+          eyebrow="Account"
+          title="Profile"
+          subtitle={profile?.email || user?.email || ''}
+          right={
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(fullName.trim()[0] || 'S').toUpperCase()}
+              </Text>
+            </View>
+          }
+        />
 
         <View style={styles.card}>
           <Text style={styles.label}>Full Name</Text>
@@ -106,50 +130,68 @@ export const ProfileScreen: React.FC = () => {
           style={styles.secondaryBtn}
           onPress={() => setShowOnboarding(true)}
         >
+          <Ionicons name="sparkles" size={16} color={colors.primary} />
           <Text style={styles.secondaryBtnText}>Generate New Roadmap</Text>
         </Pressable>
 
-        <Pressable
-          style={styles.logoutBtn}
-          onPress={() => void handleSignOut()}
-        >
+        <Pressable style={styles.logoutBtn} onPress={handleSignOut}>
+          <Ionicons name="log-out-outline" size={16} color={colors.danger} />
           <Text style={styles.logoutBtnText}>Logout</Text>
         </Pressable>
       </ScrollView>
-    </SafeAreaView>
+    </AppScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2, marginBottom: 18 },
+  container: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 40,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+  },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 18,
+    padding: spacing.lg,
     marginBottom: 16,
+    ...shadows.soft,
   },
   label: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.textSecondary,
     marginBottom: 6,
     marginTop: 10,
   },
   input: {
-    height: 46,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
     paddingHorizontal: 14,
     fontSize: 14,
     color: colors.text,
   },
-  textArea: { height: 84, paddingTop: 10 },
+  textArea: {
+    height: 90,
+    paddingTop: 12,
+  },
   statusText: {
     fontSize: 13,
     fontWeight: '600',
@@ -157,33 +199,49 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   primaryBtn: {
-    height: 48,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: radii.md,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 16,
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   secondaryBtn: {
-    height: 48,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    flexDirection: 'row',
+    gap: 8,
   },
-  secondaryBtnText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+  secondaryBtnText: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
   logoutBtn: {
-    height: 48,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: '#FECACA',
     backgroundColor: colors.dangerSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
-  logoutBtnText: { color: colors.danger, fontSize: 15, fontWeight: '700' },
+  logoutBtnText: {
+    color: colors.danger,
+    fontSize: 15,
+    fontWeight: '700',
+  },
 });

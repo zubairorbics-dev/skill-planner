@@ -55,7 +55,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 }) => {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [fullName, setFullName] = useState(profile.fullName || '');
-  const [education, setEducation] = useState(profile.education || "Bachelor's Degree");
+  // First-time setup: empty (ignore legacy auto "Bachelor's Degree").
+  // After onboarding / regenerate: show the user's saved education.
+  const [education, setEducation] = useState(
+    profile.onboardingCompleted ? profile.education || '' : ''
+  );
   const [fieldOfStudy, setFieldOfStudy] = useState(profile.fieldOfStudy || '');
   const [profession, setProfession] = useState(profile.profession || '');
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>(
@@ -183,9 +187,24 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       let errMsg = genErr.message || 'Unable to generate roadmap right now.';
       try {
         const parsed = JSON.parse(errMsg);
-        if (parsed?.error) errMsg = parsed.error;
+        if (parsed?.error && typeof parsed.error === 'string') {
+          errMsg = parsed.error;
+        }
       } catch {
         // plain text error
+      }
+      if (
+        errMsg.startsWith('{') ||
+        errMsg.includes('{{code') ||
+        errMsg.length > 220
+      ) {
+        const lower = errMsg.toLowerCase();
+        errMsg =
+          lower.includes('503') ||
+          lower.includes('high demand') ||
+          lower.includes('overloaded')
+            ? 'The AI model is busy right now. Please try again in a moment.'
+            : 'We could not build a valid roadmap right now. Please try again.';
       }
       if (!controller.signal.aborted) {
         await logAiGenerationFailure({
@@ -272,7 +291,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Alex Johnson"
+                placeholder="Enter Name"
                 maxLength={100}
                 className="w-full h-12 px-3.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
               />
@@ -287,6 +306,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                 onChange={(e) => setEducation(e.target.value)}
                 className="w-full h-12 px-3.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
               >
+                <option value="">Select education level</option>
                 {EDUCATION_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}

@@ -1,19 +1,21 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import { usePlannerStore } from '../store/usePlannerStore';
 import { toggleTaskCompletion } from '../services/firestoreService';
 import { TaskCard } from '../components/TaskCard';
+import { AppScreen } from '../components/AppScreen';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { TaskItem } from '../types/planner';
-import { colors } from '../theme';
+import { colors, radii, shadows, spacing } from '../theme';
 
 type TabParamList = {
   Home: undefined;
@@ -22,6 +24,13 @@ type TabParamList = {
   Progress: undefined;
   Profile: undefined;
 };
+
+function getCurrentDayOffset(createdAt: { toMillis?: () => number } | null | undefined): number {
+  const createdMs = createdAt?.toMillis?.() ?? Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const elapsed = Math.floor((Date.now() - createdMs) / dayMs);
+  return Math.max(1, elapsed + 1);
+}
 
 export const DashboardScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
@@ -39,11 +48,25 @@ export const DashboardScreen: React.FC = () => {
   const completedCount = tasks.filter((t) => t.isCompleted).length;
   const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-  const todayTasks = tasks.filter((t) => t.dayOffset === 1);
-  const displayedToday = todayTasks.length > 0 ? todayTasks : tasks.slice(0, 4);
+  const currentDay = useMemo(
+    () => getCurrentDayOffset(roadmap?.createdAt ?? null),
+    [roadmap?.createdAt]
+  );
+
+  const displayedToday = useMemo(() => {
+    const exact = tasks.filter(
+      (t) => !t.isCompleted && t.dayOffset === currentDay
+    );
+    if (exact.length > 0) return exact.slice(0, 4);
+    const overdue = tasks.filter(
+      (t) => !t.isCompleted && t.dayOffset < currentDay
+    );
+    return overdue.slice(0, 4);
+  }, [tasks, currentDay]);
 
   const handleToggle = async (task: TaskItem) => {
     if (!roadmap || togglingTaskId) return;
+    if (!task.isCompleted && task.dayOffset > currentDay) return;
     setTogglingTaskId(task.id);
     try {
       await toggleTaskCompletion(task, roadmap, tasks);
@@ -53,15 +76,36 @@ export const DashboardScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.welcome}>Welcome back, {firstName}</Text>
-        <Text style={styles.subtitle}>
-          {roadmap ? roadmap.targetRole : 'Ready to build your learning plan'}
-        </Text>
+    <AppScreen edges={['top', 'left', 'right']}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHeader
+          eyebrow="Home"
+          title={`Welcome back, ${firstName}`}
+          subtitle={
+            roadmap
+              ? `Day ${currentDay} · ${roadmap.targetRole}`
+              : 'Ready to build your learning plan'
+          }
+          right={
+            <Pressable
+              style={styles.avatarBtn}
+              onPress={() => navigation.navigate('Profile')}
+            >
+              <Text style={styles.avatarText}>
+                {(firstName[0] || 'S').toUpperCase()}
+              </Text>
+            </Pressable>
+          }
+        />
 
         {!roadmap ? (
           <View style={styles.emptyCard}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="map-outline" size={26} color={colors.primary} />
+            </View>
             <Text style={styles.emptyTitle}>No active roadmap yet</Text>
             <Text style={styles.emptySub}>
               Complete your learning profile to generate a personalized AI roadmap.
@@ -71,124 +115,304 @@ export const DashboardScreen: React.FC = () => {
               onPress={() => setShowOnboarding(true)}
             >
               <Text style={styles.primaryBtnText}>Create Roadmap</Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
             </Pressable>
           </View>
         ) : (
           <>
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryTop}>
+            <View style={styles.heroCard}>
+              <View style={styles.heroTop}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.summaryLabel}>Overall Progress</Text>
-                  <Text style={styles.summaryPct}>{progressPct}%</Text>
+                  <Text style={styles.heroLabel}>Overall Progress</Text>
+                  <Text style={styles.heroPct}>{progressPct}%</Text>
                 </View>
-                <Text style={styles.summaryCount}>
-                  {completedCount} / {totalCount} tasks
-                </Text>
+                <View style={styles.heroBadge}>
+                  <Text style={styles.heroBadgeText}>
+                    {completedCount}/{totalCount}
+                  </Text>
+                  <Text style={styles.heroBadgeSub}>tasks</Text>
+                </View>
               </View>
 
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
               </View>
 
-              <Text style={styles.goalLabel}>Active Goal</Text>
-              <Text style={styles.goalText}>{roadmap.goalText}</Text>
+              <Text style={styles.goalLabel}>Active goal</Text>
+              <Text style={styles.goalText} numberOfLines={3}>
+                {roadmap.goalText}
+              </Text>
 
-              <Pressable
-                style={styles.primaryBtn}
-                onPress={() => navigation.navigate('Roadmap')}
-              >
-                <Text style={styles.primaryBtnText}>View Roadmap</Text>
-              </Pressable>
+              <View style={styles.heroActions}>
+                <Pressable
+                  style={styles.primaryBtn}
+                  onPress={() => navigation.navigate('Roadmap')}
+                >
+                  <Text style={styles.primaryBtnText}>View Roadmap</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.secondaryIconBtn}
+                  onPress={() => setShowOnboarding(true)}
+                >
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                </Pressable>
+              </View>
             </View>
 
+            {(roadmap.gapAnalysis.have.length > 0 ||
+              roadmap.gapAnalysis.improve.length > 0 ||
+              roadmap.gapAnalysis.new.length > 0) && (
+              <View style={styles.gapRow}>
+                <View style={[styles.gapPill, { backgroundColor: colors.successSoft }]}>
+                  <Text style={[styles.gapPillLabel, { color: colors.success }]}>Have</Text>
+                  <Text style={styles.gapPillValue}>
+                    {roadmap.gapAnalysis.have.length}
+                  </Text>
+                </View>
+                <View style={[styles.gapPill, { backgroundColor: colors.amberSoft }]}>
+                  <Text style={[styles.gapPillLabel, { color: colors.amber }]}>Improve</Text>
+                  <Text style={styles.gapPillValue}>
+                    {roadmap.gapAnalysis.improve.length}
+                  </Text>
+                </View>
+                <View style={[styles.gapPill, { backgroundColor: colors.primarySoft }]}>
+                  <Text style={[styles.gapPillLabel, { color: colors.primary }]}>New</Text>
+                  <Text style={styles.gapPillValue}>
+                    {roadmap.gapAnalysis.new.length}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Today&apos;s Tasks</Text>
+              <Text style={styles.sectionTitle}>Today&apos;s focus</Text>
               <Pressable onPress={() => navigation.navigate('Tasks')}>
                 <Text style={styles.sectionLink}>See all</Text>
               </Pressable>
             </View>
 
-            {displayedToday.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                busy={togglingTaskId === task.id}
-                onToggle={(t) => void handleToggle(t)}
-              />
-            ))}
+            {displayedToday.length === 0 ? (
+              <View style={styles.emptyInline}>
+                <Text style={styles.emptyInlineText}>
+                  You&apos;re caught up for Day {currentDay}.
+                </Text>
+              </View>
+            ) : (
+              displayedToday.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  busy={togglingTaskId === task.id}
+                  onToggle={(t) => void handleToggle(t)}
+                />
+              ))
+            )}
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </AppScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: 20, paddingBottom: 32 },
-  welcome: { fontSize: 24, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2, marginBottom: 18 },
-  summaryCard: {
+  container: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 36,
+  },
+  avatarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  heroCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 18,
-    marginBottom: 22,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.soft,
   },
-  summaryTop: {
+  heroTop: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
   },
-  summaryLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
-  summaryPct: {
-    fontSize: 32,
+  heroLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  heroPct: {
+    fontSize: 40,
     fontWeight: '800',
     color: colors.primary,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
   },
-  summaryCount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
+  heroBadge: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radii.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  heroBadgeText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primaryDark,
     fontVariant: ['tabular-nums'],
   },
+  heroBadgeSub: {
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: '600',
+  },
   progressTrack: {
-    height: 8,
+    height: 10,
     borderRadius: 99,
     backgroundColor: colors.borderLight,
     overflow: 'hidden',
-    marginTop: 12,
+    marginTop: 14,
     marginBottom: 16,
   },
-  progressFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 99 },
-  goalLabel: { fontSize: 11, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase' },
-  goalText: { fontSize: 14, color: colors.text, lineHeight: 20, marginTop: 4, marginBottom: 16 },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 99,
+  },
+  goalLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  goalText: {
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 20,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  heroActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   primaryBtn: {
-    height: 46,
-    borderRadius: 12,
+    flex: 1,
+    height: 48,
+    borderRadius: radii.md,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  secondaryIconBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gapRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: spacing.lg,
+  },
+  gapPill: {
+    flex: 1,
+    borderRadius: radii.md,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  gapPillLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  gapPillValue: {
+    marginTop: 2,
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
-  sectionLink: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  sectionLink: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   emptyCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 24,
+    ...shadows.soft,
   },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  emptySub: { fontSize: 14, color: colors.textMuted, marginTop: 6, marginBottom: 18, lineHeight: 20 },
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  emptySub: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: 6,
+    marginBottom: 18,
+    lineHeight: 20,
+  },
+  emptyInline: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  emptyInlineText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
 });

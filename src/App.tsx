@@ -26,7 +26,13 @@ import {
   subscribeUserProfile,
   toggleTaskCompletion,
 } from './lib/firestoreService';
-import { Roadmap, TaskItem, UserProfile } from './types/planner';
+import {
+  INACTIVE_ACCOUNT_MESSAGE,
+  isProfileActive,
+  Roadmap,
+  TaskItem,
+  UserProfile,
+} from './types/planner';
 import { AuthScreen } from './components/AuthScreen';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { DashboardView } from './components/DashboardView';
@@ -67,6 +73,7 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
+  const [authBannerError, setAuthBannerError] = useState<string | null>(null);
 
   const navigate = useCallback((path: string) => {
     if (window.location.pathname !== path) {
@@ -139,12 +146,24 @@ export default function App() {
 
     setProfileLoading(true);
     ensureUserProfile(user)
-      .then((initialProfile) => {
+      .then(async (initialProfile) => {
         if (!active) return;
+        if (!isProfileActive(initialProfile)) {
+          setAuthBannerError(INACTIVE_ACCOUNT_MESSAGE);
+          setProfileLoading(false);
+          await signOut(auth);
+          return;
+        }
         setProfile(initialProfile);
         setProfileLoading(false);
         unsubProfile = subscribeUserProfile(user.uid, (nextProfile) => {
-          if (nextProfile) setProfile(nextProfile);
+          if (!nextProfile) return;
+          if (!isProfileActive(nextProfile)) {
+            setAuthBannerError(INACTIVE_ACCOUNT_MESSAGE);
+            void signOut(auth);
+            return;
+          }
+          setProfile(nextProfile);
         });
       })
       .catch((err) => {
@@ -158,22 +177,31 @@ export default function App() {
     };
   }, [user]);
 
-  // 3. Subscribe to user's active roadmap
+  // 3. Subscribe to user's active roadmap (only after active profile is ready)
   useEffect(() => {
-    if (!user) return;
-    return subscribeActiveRoadmap(user.uid, (rm) => {
-      setRoadmap(rm);
-      if (!rm) setTasks([]);
-    });
-  }, [user]);
+    if (!user || !profile || !isProfileActive(profile)) return;
+    return subscribeActiveRoadmap(
+      user.uid,
+      (rm) => {
+        setRoadmap(rm);
+        if (!rm) setTasks([]);
+      },
+      (err) => console.warn('Roadmap subscription error:', err.message)
+    );
+  }, [user, profile?.uid, profile?.accountStatus]);
 
   // 4. Subscribe to tasks for the active roadmap
   useEffect(() => {
-    if (!user || !roadmap) return;
-    return subscribeRoadmapTasks(user.uid, roadmap.id, (items) => {
-      setTasks(items);
-    });
-  }, [user, roadmap?.id]);
+    if (!user || !profile || !isProfileActive(profile) || !roadmap) return;
+    return subscribeRoadmapTasks(
+      user.uid,
+      roadmap.id,
+      (items) => {
+        setTasks(items);
+      },
+      (err) => console.warn('Tasks subscription error:', err.message)
+    );
+  }, [user, profile?.uid, profile?.accountStatus, roadmap?.id]);
 
   const handleLearnerSignOut = async () => {
     await signOut(auth);
@@ -195,6 +223,15 @@ export default function App() {
 
   const handleToggleTask = async (task: TaskItem) => {
     if (!roadmap || togglingTaskId) return;
+    const currentDay = (() => {
+      const createdMs = roadmap.createdAt?.toMillis?.() ?? Date.now();
+      const elapsed = Math.floor((Date.now() - createdMs) / (24 * 60 * 60 * 1000));
+      return Math.max(1, elapsed + 1);
+    })();
+    if (!task.isCompleted && task.dayOffset > currentDay) {
+      showToast('Upcoming tasks stay locked until their day.');
+      return;
+    }
     setTogglingTaskId(task.id);
     try {
       const nextState = await toggleTaskCompletion(task, roadmap, tasks);
@@ -268,7 +305,13 @@ export default function App() {
   }
 
   if (!user || !profile) {
-    return <AuthScreen onOpenAdminLogin={() => navigate('/admin')} />;
+    return (
+      <AuthScreen
+        onOpenAdminLogin={() => navigate('/admin')}
+        initialError={authBannerError}
+        onConsumeInitialError={() => setAuthBannerError(null)}
+      />
+    );
   }
 
   const needsOnboarding = showOnboarding || !profile.onboardingCompleted;

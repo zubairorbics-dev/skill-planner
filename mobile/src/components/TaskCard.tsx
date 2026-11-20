@@ -14,6 +14,8 @@ interface TaskCardProps {
   task: TaskItem;
   busy?: boolean;
   showResources?: boolean;
+  /** Upcoming tasks cannot be marked complete yet */
+  locked?: boolean;
   onToggle: (task: TaskItem) => void;
 }
 
@@ -27,27 +29,37 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   task,
   busy = false,
   showResources = false,
+  locked = false,
   onToggle,
 }) => {
   const badge = TYPE_STYLES[task.type] ?? TYPE_STYLES.practice;
 
   return (
-    <View style={[styles.card, task.isCompleted && styles.cardDone]}>
+    <View
+      style={[
+        styles.card,
+        task.isCompleted && styles.cardDone,
+        locked && styles.cardLocked,
+      ]}
+    >
       <Pressable
         onPress={() => onToggle(task)}
         disabled={busy}
         style={styles.row}
         accessibilityRole="checkbox"
-        accessibilityState={{ checked: task.isCompleted }}
+        accessibilityState={{ checked: task.isCompleted, disabled: locked }}
       >
         <View
           style={[
             styles.checkbox,
             task.isCompleted && styles.checkboxChecked,
+            locked && styles.checkboxLocked,
           ]}
         >
           {task.isCompleted ? (
             <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+          ) : locked ? (
+            <Ionicons name="lock-closed" size={12} color="#94A3B8" />
           ) : null}
         </View>
 
@@ -111,6 +123,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderColor: colors.borderLight,
   },
+  cardLocked: {
+    opacity: 0.72,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -130,6 +145,10 @@ const styles = StyleSheet.create({
   checkboxChecked: {
     backgroundColor: colors.success,
     borderColor: colors.success,
+  },
+  checkboxLocked: {
+    borderColor: '#CBD5E1',
+    backgroundColor: colors.surfaceMuted,
   },
   content: {
     flex: 1,

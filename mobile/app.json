@@ -4,6 +4,7 @@
     "slug": "smart-skill-planner",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "smartskillplanner",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
@@ -17,6 +18,7 @@
     "android": {
       "package": "com.smartskillplanner.app",
       "versionCode": 1,
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#4F46E5"
       },
@@ -25,7 +27,15 @@
       ]
     },
     "extra": {
-      "apiUrl": "https://ais-pre-oy5dihwswdppnwg52a74h2-6339083860.asia-southeast1.run.app"
-    }
+      "apiUrl": "http://192.168.20.15:3000",
+      "eas": {
+        "projectId": "d7422fe0-2f1b-482e-9471-debb92769f3f"
+      }
+    },
+    "owner": "zubair.orbics",
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
   }
 }

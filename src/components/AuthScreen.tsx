@@ -1,25 +1,55 @@
-import React, { useState } from 'react';
-import { signInWithPopup } from 'firebase/auth';
+import React, { useEffect, useState } from 'react';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import { ArrowRight, CheckCircle2, Layers, Target } from 'lucide-react';
-import { auth, googleAuthProvider } from '../lib/firebase';
+import { auth, db, googleAuthProvider } from '../lib/firebase';
+import {
+  INACTIVE_ACCOUNT_MESSAGE,
+  isProfileActive,
+  UserProfile,
+} from '../types/planner';
 
 interface AuthScreenProps {
   onSignedIn?: () => void;
   onOpenAdminLogin: () => void;
+  initialError?: string | null;
+  onConsumeInitialError?: () => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   onSignedIn,
   onOpenAdminLogin,
+  initialError = null,
+  onConsumeInitialError,
 }) => {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
+
+  useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+      onConsumeInitialError?.();
+    }
+  }, [initialError, onConsumeInitialError]);
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
     try {
-      await signInWithPopup(auth, googleAuthProvider);
+      const result = await signInWithPopup(auth, googleAuthProvider);
+      try {
+        const snap = await getDocFromServer(doc(db, 'profiles', result.user.uid));
+        if (snap.exists()) {
+          const profile = snap.data() as UserProfile;
+          if (!isProfileActive(profile)) {
+            await signOut(auth);
+            setError(INACTIVE_ACCOUNT_MESSAGE);
+            return;
+          }
+        }
+      } catch {
+        // App-level gate still enforces after profile sync
+      }
       onSignedIn?.();
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;

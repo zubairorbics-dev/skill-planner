@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,21 +15,72 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signOut,
   updateProfile,
 } from 'firebase/auth';
-import { auth } from '../services/firebase';
-import { colors } from '../theme';
+import { doc, getDocFromServer } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
+import {
+  getPasswordStrength,
+  PASSWORD_RULES_HINT,
+  validateStrongPassword,
+} from '../utils/password';
+import { AppScreen } from '../components/AppScreen';
+import {
+  INACTIVE_ACCOUNT_MESSAGE,
+  isProfileActive,
+  UserProfile,
+} from '../types/planner';
+import { colors, radii, shadows } from '../theme';
 
 type AuthMode = 'login' | 'register' | 'forgot';
 
-export const AuthScreen: React.FC = () => {
+function mapAuthError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : 'Authentication failed.';
+  if (msg.includes('auth/operation-not-allowed')) {
+    return 'Email/Password sign-in is not enabled in Firebase Console. Enable Authentication > Sign-in method > Email/Password.';
+  }
+  if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password')) {
+    return 'Invalid email or password.';
+  }
+  if (msg.includes('auth/user-not-found')) {
+    return 'No account found with that email.';
+  }
+  if (msg.includes('auth/email-already-in-use')) {
+    return 'An account with this email already exists. Try signing in.';
+  }
+  if (msg.includes('auth/weak-password')) {
+    return PASSWORD_RULES_HINT;
+  }
+  return msg;
+}
+
+interface AuthScreenProps {
+  initialError?: string | null;
+  onConsumeInitialError?: () => void;
+}
+
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  initialError = null,
+  onConsumeInitialError,
+}) => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const strength = useMemo(() => getPasswordStrength(password), [password]);
+
+  React.useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+      onConsumeInitialError?.();
+    }
+  }, [initialError, onConsumeInitialError]);
 
   const handleSubmit = async () => {
     const cleanEmail = email.trim();
@@ -38,12 +88,26 @@ export const AuthScreen: React.FC = () => {
       setError('Please enter your email address.');
       return;
     }
-    if (mode !== 'forgot' && password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
     if (mode === 'register' && !fullName.trim()) {
       setError('Please enter your full name.');
+      return;
+    }
+    if (mode === 'register') {
+      const passwordError = validateStrongPassword(password);
+      if (passwordError) {
+        setError(passwordError);
+        return;
+      }
+      if (!confirmPassword) {
+        setError('Please confirm your password.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError('Password and confirm password do not match.');
+        return;
+      }
+    } else if (mode === 'login' && !password) {
+      setError('Please enter your password.');
       return;
     }
 
@@ -53,7 +117,21 @@ export const AuthScreen: React.FC = () => {
 
     try {
       if (mode === 'login') {
-        await signInWithEmailAndPassword(auth, cleanEmail, password);
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        // Block deactivated accounts immediately at login
+        try {
+          const snap = await getDocFromServer(doc(db, 'profiles', cred.user.uid));
+          if (snap.exists()) {
+            const profile = snap.data() as UserProfile;
+            if (!isProfileActive(profile)) {
+              await signOut(auth);
+              setError(INACTIVE_ACCOUNT_MESSAGE);
+              return;
+            }
+          }
+        } catch {
+          // If profile cannot be read yet (e.g. unverified), App gate still enforces later
+        }
       } else if (mode === 'register') {
         const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
         await updateProfile(cred.user, { displayName: fullName.trim() });
@@ -67,25 +145,14 @@ export const AuthScreen: React.FC = () => {
         setMode('login');
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Authentication failed.';
-      if (msg.includes('auth/operation-not-allowed')) {
-        setError(
-          'Email/Password sign-in is not yet enabled in Firebase Console. Enable Authentication > Sign-in method > Email/Password for project gen-lang-client-0637292374.'
-        );
-      } else if (msg.includes('auth/invalid-credential')) {
-        setError('Invalid email or password.');
-      } else if (msg.includes('auth/email-already-in-use')) {
-        setError('An account with this email already exists. Try signing in.');
-      } else {
-        setError(msg);
-      }
+      setError(mapAuthError(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <AppScreen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -93,6 +160,7 @@ export const AuthScreen: React.FC = () => {
         <ScrollView
           contentContainerStyle={styles.container}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.brandBox}>
             <View style={styles.logo}>
@@ -112,6 +180,7 @@ export const AuthScreen: React.FC = () => {
                   setMode('login');
                   setError(null);
                   setNotice(null);
+                  setConfirmPassword('');
                 }}
               >
                 <Text
@@ -129,6 +198,7 @@ export const AuthScreen: React.FC = () => {
                   setMode('register');
                   setError(null);
                   setNotice(null);
+                  setConfirmPassword('');
                 }}
               >
                 <Text
@@ -161,7 +231,7 @@ export const AuthScreen: React.FC = () => {
                   style={styles.input}
                   value={fullName}
                   onChangeText={setFullName}
-                  placeholder="Alex Morgan"
+                  placeholder="Enter Name"
                   placeholderTextColor="#94A3B8"
                 />
               </View>
@@ -173,7 +243,7 @@ export const AuthScreen: React.FC = () => {
                 style={styles.input}
                 value={email}
                 onChangeText={setEmail}
-                placeholder="you@example.com"
+                placeholder="Enter Email Address"
                 placeholderTextColor="#94A3B8"
                 autoCapitalize="none"
                 keyboardType="email-address"
@@ -187,7 +257,61 @@ export const AuthScreen: React.FC = () => {
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="Minimum 6 characters"
+                  placeholder="Enter Password"
+                  placeholderTextColor="#94A3B8"
+                  secureTextEntry
+                />
+                {mode === 'register' ? (
+                  <>
+                    <Text style={styles.hint}>{PASSWORD_RULES_HINT}</Text>
+                    {password.length > 0 ? (
+                      <View style={styles.strengthRow}>
+                        <View style={styles.strengthTrack}>
+                          <View
+                            style={[
+                              styles.strengthFill,
+                              {
+                                width: `${Math.min(100, (strength.score / 5) * 100)}%`,
+                                backgroundColor:
+                                  strength.label === 'Weak'
+                                    ? colors.danger
+                                    : strength.label === 'Fair'
+                                      ? colors.amber
+                                      : colors.success,
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.strengthLabel,
+                            {
+                              color:
+                                strength.label === 'Weak'
+                                  ? colors.danger
+                                  : strength.label === 'Fair'
+                                    ? colors.amber
+                                    : colors.success,
+                            },
+                          ]}
+                        >
+                          {strength.label}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+
+            {mode === 'register' ? (
+              <View style={styles.field}>
+                <Text style={styles.label}>Confirm Password</Text>
+                <TextInput
+                  style={styles.input}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Confirm Password"
                   placeholderTextColor="#94A3B8"
                   secureTextEntry
                 />
@@ -237,15 +361,11 @@ export const AuthScreen: React.FC = () => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </AppScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
   flex: {
     flex: 1,
   },
@@ -253,14 +373,15 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
+    paddingBottom: 32,
   },
   brandBox: {
     alignItems: 'center',
     marginBottom: 24,
   },
   logo: {
-    width: 54,
-    height: 54,
+    width: 56,
+    height: 56,
     borderRadius: 16,
     backgroundColor: colors.primary,
     alignItems: 'center',
@@ -282,13 +403,15 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
+    paddingHorizontal: 12,
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 20,
+    ...shadows.soft,
   },
   modeTabs: {
     flexDirection: 'row',
@@ -332,6 +455,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     fontSize: 15,
     color: colors.text,
+  },
+  hint: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textMuted,
+  },
+  strengthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+  },
+  strengthTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 99,
+    backgroundColor: colors.borderLight,
+    overflow: 'hidden',
+  },
+  strengthFill: {
+    height: '100%',
+    borderRadius: 99,
+  },
+  strengthLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    minWidth: 48,
+    textAlign: 'right',
   },
   primaryBtn: {
     height: 50,
